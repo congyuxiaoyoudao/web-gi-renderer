@@ -1,8 +1,10 @@
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Environment, ContactShadows, OrbitControls, Float, Backdrop, Lightformer } from '@react-three/drei';
+import { Leva } from 'leva';
 import { WebGPURenderer } from 'three/webgpu';
-import { Suspense, useRef } from 'react';
+import { Suspense, useRef, useState, useEffect } from 'react';
 import * as THREE from 'three';
+import { CAMERA_PRESETS, useSettings } from '@/src/SettingsPanel';
 
 function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   const group = useRef<THREE.Group>(null);
@@ -21,19 +23,25 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene() {
+function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void }) {
+  const camera = useFrame((state) => {
+    if (onCameraReady && state.camera) {
+      onCameraReady(state.camera as THREE.PerspectiveCamera);
+    }
+    return state.camera;
+  });
+
   return (
     <>
       <color attach="background" args={['#111111']} />
-      
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
       <directionalLight position={[-10, 10, -10]} intensity={1} castShadow color="#ff0055" />
-      
+
       <Float speed={2} rotationIntensity={1.5} floatIntensity={2}>
         <mesh position={[0, 1, 0]} castShadow receiveShadow>
           <torusKnotGeometry args={[1, 0.3, 256, 64]} />
-          <meshPhysicalMaterial 
+          <meshPhysicalMaterial
             color="#ffffff"
             metalness={0.1}
             roughness={0.05}
@@ -54,8 +62,8 @@ function Scene() {
       <Float speed={1.5} rotationIntensity={2} floatIntensity={1.5}>
         <mesh position={[-2.5, 0, -2]} castShadow receiveShadow>
           <sphereGeometry args={[0.8, 64, 64]} />
-          <meshPhysicalMaterial 
-            color="#ff0055"
+          <meshPhysicalMaterial
+            color={sphereColor}
             metalness={0.9}
             roughness={0.1}
             clearcoat={1}
@@ -90,6 +98,17 @@ function Scene() {
 }
 
 export default function App() {
+  const { sphereColor, cameraPreset } = useSettings();
+  const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
+
+  useEffect(() => {
+    if (!camera) return;
+    const preset = CAMERA_PRESETS[cameraPreset];
+    camera.position.set(preset.position[0], preset.position[1], preset.position[2]);
+    camera.lookAt(0, 1, 0);
+    camera.updateProjectionMatrix();
+  }, [cameraPreset, camera]);
+
   return (
     <div className="w-full h-screen bg-zinc-950">
       <div className="absolute top-6 left-6 z-10 text-white font-sans pointer-events-none">
@@ -108,7 +127,7 @@ export default function App() {
           let initPromise = renderer.init();
           let initialized = false;
           initPromise.then(() => { initialized = true; });
-          
+
           renderer.render = (scene, camera) => {
             if (initialized) {
               originalRender(scene, camera);
@@ -124,9 +143,10 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene />
+          <Scene sphereColor={sphereColor} onCameraReady={setCamera} />
         </Suspense>
       </Canvas>
+      <Leva />
     </div>
   );
 }
