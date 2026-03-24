@@ -34,6 +34,19 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
   return (
     <>
       <color attach="background" args={['#111111']} />
+
+      {/* <Environment files="https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/potsdamer_platz_1k.hdr" background blur={0.0} /> */}
+      <Environment
+        files={[
+          '/assets/px.jpg',
+          '/assets/nx.jpg',
+          '/assets/py.jpg',
+          '/assets/ny.jpg',
+          '/assets/pz.jpg',
+          '/assets/nz.jpg',
+        ]}
+        background
+      />
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
       <directionalLight position={[-10, 10, -10]} intensity={1} castShadow color="#ff0055" />
