@@ -5,6 +5,7 @@ import { WebGPURenderer } from 'three/webgpu';
 import { Suspense, useRef, useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { CAMERA_PRESETS, useSettings } from '@/src/SettingsPanel';
+import { WebGPUSplat } from './WebGPUSplat';
 
 function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   const group = useRef<THREE.Group>(null);
@@ -45,8 +46,10 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
           '/assets/pz.jpg',
           '/assets/nz.jpg',
         ]}
-        background
+        background blur={0.8}
       />
+      <WebGPUSplat url="/assets/food.ply" />
+
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
       <directionalLight position={[-10, 10, -10]} intensity={1} castShadow color="#ff0055" />
