@@ -6,6 +6,7 @@ import { Suspense, useRef, useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { CAMERA_PRESETS, useSettings } from '@/src/SettingsPanel';
 import { WebGPUSplat } from './WebGPUSplat';
+import Loader from './Loader';
 
 function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   const group = useRef<THREE.Group>(null);
@@ -116,6 +117,12 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
 export default function App() {
   const { sphereColor, cameraPreset } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setLoading(false), 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (!camera) return;
@@ -127,6 +134,7 @@ export default function App() {
 
   return (
     <div className="w-full h-screen bg-zinc-950">
+      <Loader loading={loading} />
       <div className="absolute top-6 left-6 z-10 text-white font-sans pointer-events-none">
         <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">WebGPU PBR & GI</h1>
         <p className="text-zinc-400 text-sm mt-2 max-w-md">
