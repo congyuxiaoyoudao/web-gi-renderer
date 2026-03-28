@@ -1,4 +1,4 @@
-import { Gaussian } from './loadPly';
+import { GaussianBuffers } from './loadPly';
 import type { Mat4 } from 'wgpu-matrix'
 import splat_shader from './splat_shader';
 
@@ -9,16 +9,14 @@ export class Splats {
     private _splatPositionBuffer: GPUBuffer;
     private _splatIdsBuffer: GPUBuffer;
     private _cov3dBuffer: GPUBuffer;
-    private _splats: Gaussian[];
- 
-    constructor(device: GPUDevice, vertices: Gaussian[], viewParamsBindGroupLayout: GPUBindGroupLayout, format: GPUTextureFormat, depthFormat?: GPUTextureFormat) {
+    private _positionsBuffer: Float32Array;
+
+    constructor(device: GPUDevice, vertices: GaussianBuffers, viewParamsBindGroupLayout: GPUBindGroupLayout, format: GPUTextureFormat, depthFormat?: GPUTextureFormat) {
         const shaderModule = device.createShaderModule({
             code: splat_shader
         });
-    
-        const positions = new Float32Array(vertices.flatMap(vertex => [...vertex.position, 0.0]));
-        const cov3d = new Float32Array(vertices.flatMap(vertex => vertex.cov3d));
-        const colors = new Float32Array(vertices.flatMap(vertex => [...vertex.color,vertex.opacity]))
+
+        const { positions, cov3d, colors } = vertices;
 
         // UPLPOAD SPLAT DATA TO GPU AS UNIFORMS
         // each splat has its color, position and cov3d buffer
@@ -41,32 +39,24 @@ export class Splats {
                 }
             ],
         });
-        const positionsBuffer = device?.createBuffer({
-            size: 4 * Float32Array.BYTES_PER_ELEMENT * vertices.length,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX,
-            mappedAtCreation: true,
-        });
-        const positionsData = positionsBuffer.getMappedRange();
-        new Float32Array(positionsData).set(positions);
-        positionsBuffer.unmap();
-        
-        const cov3dBuffer = device?.createBuffer({
-            size: 8 * Float32Array.BYTES_PER_ELEMENT * vertices.length,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-            mappedAtCreation: true,
-        });
-        const cov3dData = cov3dBuffer.getMappedRange();
-        new Float32Array(cov3dData).set(cov3d);
-        cov3dBuffer.unmap();
 
-        const colorsBuffer = device?.createBuffer({
-            size: 4 * Float32Array.BYTES_PER_ELEMENT * vertices.length,
-            usage: GPUBufferUsage.STORAGE,
-            mappedAtCreation: true,
+        const positionsBuffer = device.createBuffer({
+            size: 4 * Float32Array.BYTES_PER_ELEMENT * vertices.count,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         });
-        const colorsData = colorsBuffer.getMappedRange();
-        new Float32Array(colorsData).set(colors);
-        colorsBuffer.unmap();
+        device.queue.writeBuffer(positionsBuffer, 0, positions.buffer);
+
+        const cov3dBuffer = device.createBuffer({
+            size: 8 * Float32Array.BYTES_PER_ELEMENT * vertices.count,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+        device.queue.writeBuffer(cov3dBuffer, 0, cov3d.buffer);
+
+        const colorsBuffer = device.createBuffer({
+            size: 4 * Float32Array.BYTES_PER_ELEMENT * vertices.count,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+        device.queue.writeBuffer(colorsBuffer, 0, colors.buffer);
 
         const splatBindGroup = device?.createBindGroup({
             layout: splatBindGroupLayout,
@@ -85,7 +75,7 @@ export class Splats {
                 }
             ],
         });
-    
+
         //CREATE VERTEX ATTRIBUTE BUFFERS
         // 2*2 quad
         const splatPos = new Float32Array([
@@ -94,14 +84,11 @@ export class Splats {
             1, -1,
             -1, -1
         ]);
-        const splatPosBuffer = device?.createBuffer({
+        const splatPosBuffer = device.createBuffer({
             size: 2 * Float32Array.BYTES_PER_ELEMENT * 4,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-            mappedAtCreation: true,
         });
-        const splatPosData = splatPosBuffer.getMappedRange();
-        new Float32Array(splatPosData).set(splatPos);
-        splatPosBuffer.unmap();
+        device.queue.writeBuffer(splatPosBuffer, 0, splatPos.buffer, splatPos.byteOffset, splatPos.byteLength);
         const splatPositionBufferLayoutDescriptor: GPUVertexBufferLayout = {
             arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT,
             stepMode: 'vertex',
@@ -112,15 +99,12 @@ export class Splats {
             }]
         };
 
-        const splatIds = new Uint32Array(vertices.length).fill(0).map((_, i) => i);
-        const splatIdsBuffer = device?.createBuffer({
-            size: Uint32Array.BYTES_PER_ELEMENT * vertices.length,
+        const splatIds = new Uint32Array(vertices.count).fill(0).map((_, i) => i);
+        const splatIdsBuffer = device.createBuffer({
+            size: Uint32Array.BYTES_PER_ELEMENT * vertices.count,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-            mappedAtCreation: true,
         });
-        const splatIdsData = splatIdsBuffer.getMappedRange();
-        new Uint32Array(splatIdsData).set(splatIds);
-        splatIdsBuffer.unmap();
+        device.queue.writeBuffer(splatIdsBuffer, 0, splatIds.buffer, splatIds.byteOffset, splatIds.byteLength);
 
         const splatIdsBufferLayoutDescriptor: GPUVertexBufferLayout = {
             arrayStride: Uint32Array.BYTES_PER_ELEMENT,
@@ -132,7 +116,7 @@ export class Splats {
             }]
         };
 
-        
+
         //CREATE PIPELINE
         const colorState: GPUColorTargetState = {
             format: format,
@@ -148,7 +132,7 @@ export class Splats {
                     dstFactor: 'one-minus-src-alpha',
                 }
             }
-        };  
+        };
 
         const renderPipeline = device.createRenderPipeline({
             layout: device.createPipelineLayout({
@@ -158,7 +142,7 @@ export class Splats {
                 module: shaderModule,
                 entryPoint: 'vs_main',
                 buffers: [
-                    splatPositionBufferLayoutDescriptor, 
+                    splatPositionBufferLayoutDescriptor,
                     splatIdsBufferLayoutDescriptor
                 ]
             },
@@ -179,68 +163,71 @@ export class Splats {
                     depthCompare: 'less-equal'
                 }
             } : {})
-        })
-        
-        
+        });
+
         this._renderPipeline = renderPipeline;
-        this._numVertices = vertices.length;
+        this._numVertices = vertices.count;
         this._splatBindGroup = splatBindGroup;
         this._splatPositionBuffer = splatPosBuffer;
         this._splatIdsBuffer = splatIdsBuffer;
-        this._splats = vertices;
+        this._positionsBuffer = positions;
         this._cov3dBuffer = cov3dBuffer;
     }
 
     public updateSplatIndexBuffer(device: GPUDevice, projectionMatrix: Mat4, modelViewMatrix: Mat4, commandEncoder: GPUCommandEncoder) {
-          const distances = new Float32Array(this._splats.length);
-          
-          // Extract the Z row of the modelViewMatrix (m20, m21, m22, m23)
-          // In column-major memory: m[2], m[6], m[10], m[14]
-          const m20 = modelViewMatrix[2];
-          const m21 = modelViewMatrix[6];
-          const m22 = modelViewMatrix[10];
-          const m23 = modelViewMatrix[14];
+        // Calculate depth sorting on CPU (back-to-front for alpha blending)
+        const distances = new Float32Array(this._numVertices);
+        const visibleIndices: number[] = [];
 
-          // compute each splats' view-space Z
-          for (let i = 0; i < this._splats.length; ++i) {
-            const pos = this._splats[i].position;
-            // viewPos.z = pos.x * m20 + pos.y * m21 + pos.z * m22 + m23
-            distances[i] = pos[0] * m20 + pos[1] * m21 + pos[2] * m22 + m23;
-          }
-          
-          // Create array of indices and sort them based on distances
-          const indices = new Uint32Array(distances.length);
-          for (let i = 0; i < indices.length; i++) indices[i] = i;
-          
-          // Sort ascending (most negative Z first = furthest away) for back-to-front rendering
-          indices.sort((a, b) => distances[a] - distances[b]); 
-  
-          const indexUpdateBuffer = device.createBuffer({
-            size: indices.length * Uint32Array.BYTES_PER_ELEMENT,
-            usage: GPUBufferUsage.COPY_SRC,
-            mappedAtCreation: true
-          });
-          new Uint32Array(indexUpdateBuffer.getMappedRange()).set(indices);
-          indexUpdateBuffer.unmap();
-  
-          commandEncoder.copyBufferToBuffer(
-              indexUpdateBuffer, // src
-              0,
-              this._splatIdsBuffer, // dst
-              0,
-              indices.length * Uint32Array.BYTES_PER_ELEMENT
-          );
-  
-          return indexUpdateBuffer;
+        // Extract view-space Z row from modelViewMatrix
+        const m20 = modelViewMatrix[2];
+        const m21 = modelViewMatrix[6];
+        const m22 = modelViewMatrix[10];
+        const m23 = modelViewMatrix[14];
+
+        // Compute view-space Z for each splat and perform frustum culling
+        for (let i = 0; i < this._numVertices; ++i) {
+            const baseIdx = i * 4;
+            const x = this._positionsBuffer[baseIdx + 0];
+            const y = this._positionsBuffer[baseIdx + 1];
+            const z = this._positionsBuffer[baseIdx + 2];
+
+            // Compute view-space Z for culling (optimize by only computing Z)
+            const viewZ = x * m20 + y * m21 + z * m22 + m23;
+
+            distances[i] = viewZ;
+
+            // Simple frustum culling: check if point is in front of near plane
+            // In view space, camera looks down -Z, so visible points have negative Z
+            if (viewZ < 0) {
+                visibleIndices.push(i);
+            }
+        }
+
+        // Generate sorted indices (furthest to nearest) for visible splats only
+        const indices = new Uint32Array(visibleIndices.length);
+        for (let i = 0; i < visibleIndices.length; i++) {
+            indices[i] = visibleIndices[i];
+        }
+
+        // Sort by distance (back-to-front)
+        indices.sort((a, b) => distances[a] - distances[b]);
+
+        // Update instance buffer directly via queue.writeBuffer
+        device.queue.writeBuffer(this._splatIdsBuffer, 0, indices.buffer, indices.byteOffset, indices.byteLength);
+
+        // Return the number of visible splats for rendering
+        return visibleIndices.length;
     }
 
-    public render(renderPass: GPURenderPassEncoder, viewParamsBindGroup: GPUBindGroup) {
+    public render(renderPass: GPURenderPassEncoder, viewParamsBindGroup: GPUBindGroup, numSplats?: number) {
         renderPass.setPipeline(this._renderPipeline);
         renderPass.setBindGroup(0, viewParamsBindGroup);
         renderPass.setBindGroup(1, this._splatBindGroup);
         renderPass.setVertexBuffer(0, this._splatPositionBuffer);
         renderPass.setVertexBuffer(1, this._splatIdsBuffer);
-        // Draw all splats in a single instanced draw call
-        renderPass.draw(4, this._numVertices, 0, 0);
+        // Draw visible splats (or all if numSplats not specified)
+        const count = numSplats !== undefined ? numSplats : this._numVertices;
+        renderPass.draw(4, count, 0, 0);
     }
 }

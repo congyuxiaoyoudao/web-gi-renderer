@@ -12,14 +12,14 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
   
   useEffect(() => {
     let isMounted = true;
-    
+
     async function init() {
       // Access WebGPU device and context from Three.js WebGPURenderer
       const backend = (gl as any).backend;
       if (!backend) return;
       const device = backend.device as GPUDevice;
       if (!device) return;
-      
+
       const format = navigator.gpu.getPreferredCanvasFormat();
 
       const viewParamBindGroupLayout = device.createBindGroupLayout({
@@ -65,15 +65,11 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
       setViewParamBindGroup(bindGroup);
 
       try {
-        const response = await fetch(url);
-        const blob = await response.blob();
-        const file = new File([blob], 'splat.ply');
-
         const parser = new PlyLoader();
-        await parser.loadPlyFile(file);
+        const gaussianBuffers = await parser.loadFromUrl(url);
 
         if (isMounted) {
-          const newSplats = new Splats(device, parser.getSplattifiedVertices(), viewParamBindGroupLayout, format);
+          const newSplats = new Splats(device, gaussianBuffers, viewParamBindGroupLayout, format);
           setSplats(newSplats);
         }
       } catch (e) {
@@ -82,7 +78,7 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
     }
 
     init();
-    
+
     return () => {
       isMounted = false;
     };
@@ -90,6 +86,7 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
 
   const lastCamPos = useRef(vec3.zero());
   const lastCamRot = useRef(vec3.zero());
+  const visibleCountRef = useRef<number>(0);
 
   // Render after Three.js
   useFrame(({ gl, scene, camera }) => {
@@ -115,51 +112,25 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
           shouldUpdate = true;
       }
 
-      // Update buffers
+      // Update buffers using queue.writeBuffer (more efficient than staging buffers)
       const projection = new Float32Array(camera.projectionMatrix.elements);
       const modelView = new Float32Array(camera.matrixWorldInverse.elements);
 
-      const projectionUpdateBuffer = device.createBuffer({
-        size: 16 * Float32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.COPY_SRC,
-        mappedAtCreation: true
-      });
-      new Float32Array(projectionUpdateBuffer.getMappedRange()).set(projection);
-      projectionUpdateBuffer.unmap();
-
-      const modelViewUpdateBuffer = device.createBuffer({
-        size: 16 * Float32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.COPY_SRC,
-        mappedAtCreation: true
-      });
-      new Float32Array(modelViewUpdateBuffer.getMappedRange()).set(modelView);
-      modelViewUpdateBuffer.unmap();
-
-      const screenSizeUpdateBuffer = device.createBuffer({
-        size: 2 * Float32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.COPY_SRC,
-        mappedAtCreation: true
-      });
-      new Float32Array(screenSizeUpdateBuffer.getMappedRange()).set([size.width, size.height]);
-      screenSizeUpdateBuffer.unmap();
-
-      const splatRadiusUpdateBuffer = device.createBuffer({
-        size: Float32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.COPY_SRC,
-        mappedAtCreation: true
-      });
-      new Float32Array(splatRadiusUpdateBuffer.getMappedRange())[0] = splatRadius;
-      splatRadiusUpdateBuffer.unmap();
+      // Directly write to uniform buffers using queue.writeBuffer
+      device.queue.writeBuffer(buffersRef.current.projectionBuffer, 0, projection);
+      device.queue.writeBuffer(buffersRef.current.modelViewBuffer, 0, modelView);
+      device.queue.writeBuffer(buffersRef.current.screenSizeBuffer, 0, new Float32Array([size.width, size.height]));
+      device.queue.writeBuffer(buffersRef.current.splatRadiusBuffer, 0, new Float32Array([splatRadius]));
 
       const commandEncoder = device.createCommandEncoder();
-      commandEncoder.copyBufferToBuffer(projectionUpdateBuffer, 0, buffersRef.current.projectionBuffer, 0, 16 * Float32Array.BYTES_PER_ELEMENT);
-      commandEncoder.copyBufferToBuffer(screenSizeUpdateBuffer, 0, buffersRef.current.screenSizeBuffer, 0, 2 * Float32Array.BYTES_PER_ELEMENT);
-      commandEncoder.copyBufferToBuffer(modelViewUpdateBuffer, 0, buffersRef.current.modelViewBuffer, 0, 16 * Float32Array.BYTES_PER_ELEMENT);
-      commandEncoder.copyBufferToBuffer(splatRadiusUpdateBuffer, 0, buffersRef.current.splatRadiusBuffer, 0, Float32Array.BYTES_PER_ELEMENT);
-      
-      let splatIndexBuffer: GPUBuffer | null = null;
+
+      let visibleCount: number | null = null;
       if (shouldUpdate) {
-        splatIndexBuffer = splats.updateSplatIndexBuffer(device, projection, modelView, commandEncoder);
+        visibleCount = splats.updateSplatIndexBuffer(device, projection, modelView, commandEncoder);
+        if (visibleCount !== null) {
+          visibleCountRef.current = visibleCount;
+          console.log(`Rendering ${visibleCount} splats out of ${splats['_numVertices']} total (${Math.round(visibleCount / splats['_numVertices'] * 100)}% visible)`);
+        }
       }
 
       const renderPassDesc: GPURenderPassDescriptor = {
@@ -171,18 +142,10 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
       };
 
       const renderPass = commandEncoder.beginRenderPass(renderPassDesc);
-      splats.render(renderPass, viewParamBindGroup);
+      splats.render(renderPass, viewParamBindGroup, visibleCountRef.current);
       renderPass.end();
 
       device.queue.submit([commandEncoder.finish()]);
-      
-      projectionUpdateBuffer.destroy();
-      screenSizeUpdateBuffer.destroy();
-      modelViewUpdateBuffer.destroy();
-      splatRadiusUpdateBuffer.destroy();
-      if (splatIndexBuffer != null) {
-        splatIndexBuffer.destroy();
-      }
     } catch (err) {
       console.error("Error in WebGPUSplat useFrame:", err);
     }

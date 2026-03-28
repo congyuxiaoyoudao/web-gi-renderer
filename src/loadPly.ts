@@ -1,253 +1,313 @@
-import type { Vec3, Vec4, Mat3, Mat4 } from 'wgpu-matrix'
-import { mat3, mat4, vec2, vec3, vec4, quat} from 'wgpu-matrix'
-
-export class Gaussian{
-    private _position : Vec3;
-    private _rotation : Vec4;
-    private _scale    : Vec3;
-    private _color    : Vec3;
-    private _opacity  : number;
-    private _covariance3d : Mat3;
-    private _basis2d : Vec4;
-
-    constructor(position: Vec3, rotation: Vec4, scale: Vec3, color: Vec3, opacity: number){
-        this._position = position;
-        this._rotation = rotation;
-        this._scale = scale;
-        this._color = color;
-        this._opacity = opacity;
-
-        const quaternion = quat.create(rotation[1], rotation[2], rotation[3], rotation[0]);
-        quat.normalize(quaternion, quaternion);
-        const rotationMat4 = mat4.fromQuat(quaternion);
-        const rotationMat3 = mat3.fromMat4(rotationMat4); 
-
-        const scaleMat4 = mat4.scaling(scale);
-        const scaleMat3 = mat3.fromMat4(scaleMat4);
-
-        // compute covariance by R S ST RT
-        const T = mat3.multiply(rotationMat3, scaleMat3);
-        const T_T = mat3.transpose(T);
-        const covarianceMat3 = mat3.multiply(T, T_T);
-
-        this._covariance3d = covarianceMat3;
-        this._basis2d = vec4.create(1, -1, 1, 1);
- 
-    }
-    public updateBasis(projectionMatrix: Mat4, modelViewMatrix: Mat4, canvas: HTMLCanvasElement) {
-        const renderDimension = { x: canvas.clientWidth, y: canvas.clientHeight };
-        const focal = {
-            x: projectionMatrix[0] * renderDimension.x * 0.5,
-            y: projectionMatrix[5] * renderDimension.y * 0.5
-        }
-
-        const viewCenter = vec4.transformMat4(vec4.fromValues(this._position[0], this._position[1], this._position[2], 1.0), modelViewMatrix);
-        const s = 1.0 / (viewCenter[2] * viewCenter[2]);
-
-        const J = mat3.create(
-            -focal.x / viewCenter[2], 0, (focal.x * viewCenter[0]) * s,
-            0, -focal.y / viewCenter[2], (focal.y * viewCenter[1]) * s,
-            0, 0, 0
-        );
-
-        const W = mat3.transpose(mat3.fromMat4(modelViewMatrix));
-        const T = mat3.multiply(W, J);
-
-        const newC = mat3.multiply(mat3.transpose(T), mat3.multiply(this._covariance3d, T));
-        
-        // F**K here in wgpu-matrix mat3 are padded to 12 numbers
-        // c_xx, c_xy, 0, 0
-        // c_yx, c_yy, 0, 0
-        // ...   ...   ... ...
-        const c_xx = newC[0];
-        const c_xy = newC[1];
-        const c_yy = newC[5];
-
-        // compute eigen values
-        const D = c_xx * c_yy - c_xy * c_xy;
-        const trace = c_xx + c_yy;
-        const traceOver2 = trace / 2;
-        const term2 = Math.sqrt(traceOver2 * traceOver2 - D);
-        const lambda_1 = traceOver2 + term2;
-        const lambda_2 = Math.max(traceOver2 - term2, 0);
-
-        // compute eigen vector
-        const maxSplatRadius = 1024;
-        const eigenVector_1 = vec2.normalize(vec2.fromValues(c_xy, lambda_1 - c_xx));
-        const eigenVector_2 = vec2.fromValues(eigenVector_1[1], -eigenVector_1[0]);
-
-        const basisVector1 = vec2.scale(eigenVector_1, Math.min(Math.sqrt(lambda_1) * 4, maxSplatRadius));
-        const basisVector2 = vec2.scale(eigenVector_2, Math.min(Math.sqrt(lambda_2) * 4, maxSplatRadius));
-
-        this._basis2d = vec4.fromValues(basisVector1[0], basisVector1[1], basisVector2[0], basisVector2[1]);
-    }
-
-    // -------- GETTER ------------ //
-    get position(){ return this._position;}
-    get rotation(){ return this._rotation;}
-    get scale(){ return this._scale;}
-    get color(){ return this._color;}
-    get opacity(){ return this._opacity;}
-    get basis(){ return this._basis2d;}
-    get cov3d() {
-        return [
-            this._covariance3d[0], // c_xx
-            this._covariance3d[1], // c_xy
-            this._covariance3d[2], // c_xz
-            this._covariance3d[5], // c_yy
-            this._covariance3d[6], // c_yz
-            this._covariance3d[10], // c_zz
-            0, 0 // padding
-        ];
-    }
+export interface GaussianBuffers {
+    positions: Float32Array;  // [x, y, z, padding] * count
+    cov3d: Float32Array;      // [c_xx, c_xy, c_xz, c_yy, c_yz, c_zz, 0, 0] * count
+    colors: Float32Array;     // [r, g, b, opacity] * count
+    count: number;
 }
 
 export class PlyLoader {
     private header: string[] = [];
     private format: string = '';
     private numVertices: number = 0;
-    private properties: { name: string; type: string }[] = [];
+    private properties: { name: string; type: string; offset?: number }[] = [];
     private headerLength: number = 0;
-    private rawVertices: any[] = [];
-    private splattifiedVertices: Gaussian[] = [];
-    
-    async loadPlyFile(file: File) {
-        const buffer = await file.arrayBuffer();
+    private vertexStride: number = 0;
+
+    async loadFromUrl(url: string): Promise<GaussianBuffers> {
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        return this.parsePly(arrayBuffer);
+    }
+
+    async parsePly(buffer: ArrayBuffer): Promise<GaussianBuffers> {
+        this.parseHeader(buffer);
+
+        if (this.format === 'binary_little_endian') {
+            return this.parseBinary(buffer);
+        } else if (this.format === 'ascii') {
+            return this.parseASCII(buffer);
+        } else {
+            throw new Error(`Unsupported PLY format: ${this.format}`);
+        }
+    }
+
+    private parseHeader(buffer: ArrayBuffer): void {
         const decoder = new TextDecoder();
-        let headerText = '';
-        const chunk = new Uint8Array(buffer, 0, Math.min(2048, buffer.byteLength)); // 2048 is probably enough to get the end header
-        
-        // Find the end of the header first
-        headerText = decoder.decode(chunk);
+        const chunk = new Uint8Array(buffer, 0, Math.min(2048, buffer.byteLength));
+        const headerText = decoder.decode(chunk);
+
         const headerEndIndex = headerText.indexOf('end_header\n');
         if (headerEndIndex === -1) {
             throw new Error('Invalid PLY file: Cannot find end of header');
         }
-        this.headerLength = headerEndIndex + 11; // 11 is length of 'end_header\n'
-        
-        // Parse header
+        this.headerLength = headerEndIndex + 11; // 'end_header\n' 的长度
+
         const headerLines = headerText.slice(0, headerEndIndex).split('\n').map(line => line.trim());
         let i = 0;
+
         if (headerLines[i] !== 'ply') {
             throw new Error('Invalid PLY file: Missing "ply" header');
         }
-        
+
         i++;
+        let currentPropertyOffset = 0;
+
         while (i < headerLines.length) {
             const line = headerLines[i];
             this.header.push(line);
-            
+
             if (line.startsWith('format')) {
-                // format ascii or binary_little_endian
                 this.format = line.split(' ')[1];
             } else if (line.startsWith('element vertex')) {
                 this.numVertices = parseInt(line.split(' ')[2]);
-            } else if (line.startsWith('comment')){
-                console.log('CommentLine', line);
             } else if (line.startsWith('property')) {
                 const parts = line.split(' ');
-                this.properties.push({
+                const prop = {
                     name: parts[2],
-                    type: parts[1]
-                });
+                    type: parts[1],
+                    offset: currentPropertyOffset
+                };
+                this.properties.push(prop);
+                currentPropertyOffset += this.getTypeSize(prop.type);
             }
+
             i++;
         }
 
-        // Parse vertex data based on format
-        if (this.format === 'binary_little_endian') {
-            this.rawVertices = this.parseBinary(buffer);
-        } else if (this.format === 'ascii'){
-            this.rawVertices = this.parseASCII(buffer, headerEndIndex);
-        } else {
-            throw new Error(`Unsupported PLY format: ${this.format}`);
-        }
-
-        this.splattifiedVertices = this.splatifyVertices(this.rawVertices);
+        this.vertexStride = currentPropertyOffset;
     }
-    private parseBinary(buffer: ArrayBuffer): any[] {
+
+    private parseBinary(buffer: ArrayBuffer): GaussianBuffers {
         const dataView = new DataView(buffer);
-        const vertices: any[] = [];
+        const SH_C0 = 0.28209479177387814;
+
+        const positions = new Float32Array(this.numVertices * 4);
+        const cov3d = new Float32Array(this.numVertices * 8);
+        const colors = new Float32Array(this.numVertices * 4);
+
         let offset = this.headerLength;
 
+        const getPropertyOffset = (name: string): number => {
+            const prop = this.properties.find(p => p.name === name);
+            return prop?.offset ?? -1;
+        };
+
+        const x_offset = getPropertyOffset('x');
+        const y_offset = getPropertyOffset('y');
+        const z_offset = getPropertyOffset('z');
+        const rot_0_offset = getPropertyOffset('rot_0');
+        const rot_1_offset = getPropertyOffset('rot_1');
+        const rot_2_offset = getPropertyOffset('rot_2');
+        const rot_3_offset = getPropertyOffset('rot_3');
+        const scale_0_offset = getPropertyOffset('scale_0');
+        const scale_1_offset = getPropertyOffset('scale_1');
+        const scale_2_offset = getPropertyOffset('scale_2');
+        const f_dc_0_offset = getPropertyOffset('f_dc_0');
+        const f_dc_1_offset = getPropertyOffset('f_dc_1');
+        const f_dc_2_offset = getPropertyOffset('f_dc_2');
+        const opacity_offset = getPropertyOffset('opacity');
+
         for (let v = 0; v < this.numVertices; v++) {
-            const vertex: any = {};
-            
-            for (const prop of this.properties) {
-                const value = this.readBinaryValue(dataView, offset, prop.type);
-                vertex[prop.name] = value;
-                offset += this.getTypeSize(prop.type);
-            }
-            
-            vertices.push(vertex);
+            const baseOffset = this.headerLength + v * this.vertexStride;
+
+            const x = dataView.getFloat32(baseOffset + x_offset, true);
+            const y = dataView.getFloat32(baseOffset + y_offset, true);
+            const z = dataView.getFloat32(baseOffset + z_offset, true);
+
+            const rot_0 = dataView.getFloat32(baseOffset + rot_0_offset, true);
+            const rot_1 = dataView.getFloat32(baseOffset + rot_1_offset, true);
+            const rot_2 = dataView.getFloat32(baseOffset + rot_2_offset, true);
+            const rot_3 = dataView.getFloat32(baseOffset + rot_3_offset, true);
+
+            const scale_0 = Math.exp(dataView.getFloat32(baseOffset + scale_0_offset, true));
+            const scale_1 = Math.exp(dataView.getFloat32(baseOffset + scale_1_offset, true));
+            const scale_2 = Math.exp(dataView.getFloat32(baseOffset + scale_2_offset, true));
+
+            const f_dc_0 = dataView.getFloat32(baseOffset + f_dc_0_offset, true);
+            const f_dc_1 = dataView.getFloat32(baseOffset + f_dc_1_offset, true);
+            const f_dc_2 = dataView.getFloat32(baseOffset + f_dc_2_offset, true);
+
+            const opacity = 1.0 / (1.0 + Math.exp(-dataView.getFloat32(baseOffset + opacity_offset, true)));
+
+            // write positions [x, y, z, padding]
+            positions[v * 4 + 0] = x;
+            positions[v * 4 + 1] = y;
+            positions[v * 4 + 2] = z;
+            positions[v * 4 + 3] = 0.0;
+
+            const q_len = Math.sqrt(rot_0 * rot_0 + rot_1 * rot_1 + rot_2 * rot_2 + rot_3 * rot_3);
+            const q0 = rot_0 / q_len;
+            const q1 = rot_1 / q_len;
+            const q2 = rot_2 / q_len;
+            const q3 = rot_3 / q_len;
+
+            // construct rotation from quaternion
+            const r00 = 1 - 2 * (q2 * q2 + q3 * q3);
+            const r01 = 2 * (q1 * q2 - q0 * q3);
+            const r02 = 2 * (q1 * q3 + q0 * q2);
+
+            const r10 = 2 * (q1 * q2 + q0 * q3);
+            const r11 = 1 - 2 * (q1 * q1 + q3 * q3);
+            const r12 = 2 * (q2 * q3 - q0 * q1);
+
+            const r20 = 2 * (q1 * q3 - q0 * q2);
+            const r21 = 2 * (q2 * q3 + q0 * q1);
+            const r22 = 1 - 2 * (q1 * q1 + q2 * q2);
+
+            const s0 = scale_0;
+            const s1 = scale_1;
+            const s2 = scale_2;
+
+            // compute T = R * S
+            const t00 = r00 * s0;
+            const t01 = r01 * s1;
+            const t02 = r02 * s2;
+            const t10 = r10 * s0;
+            const t11 = r11 * s1;
+            const t12 = r12 * s2;
+            const t20 = r20 * s0;
+            const t21 = r21 * s1;
+            const t22 = r22 * s2;
+
+            // compute covariance matrix C = T * T^T
+            const c_xx = t00 * t00 + t01 * t01 + t02 * t02;
+            const c_xy = t00 * t10 + t01 * t11 + t02 * t12;
+            const c_xz = t00 * t20 + t01 * t21 + t02 * t22;
+            const c_yy = t10 * t10 + t11 * t11 + t12 * t12;
+            const c_yz = t10 * t20 + t11 * t21 + t12 * t22;
+            const c_zz = t20 * t20 + t21 * t21 + t22 * t22;
+
+            // write cov3d [c_xx, c_xy, c_xz, c_yy, c_yz, c_zz, 0, 0]
+            cov3d[v * 8 + 0] = c_xx;
+            cov3d[v * 8 + 1] = c_xy;
+            cov3d[v * 8 + 2] = c_xz;
+            cov3d[v * 8 + 3] = c_yy;
+            cov3d[v * 8 + 4] = c_yz;
+            cov3d[v * 8 + 5] = c_zz;
+            cov3d[v * 8 + 6] = 0.0;
+            cov3d[v * 8 + 7] = 0.0;
+
+            // write colors [r, g, b, opacity]
+            colors[v * 4 + 0] = 0.5 + SH_C0 * f_dc_0;
+            colors[v * 4 + 1] = 0.5 + SH_C0 * f_dc_1;
+            colors[v * 4 + 2] = 0.5 + SH_C0 * f_dc_2;
+            colors[v * 4 + 3] = opacity;
         }
 
-        return vertices;
+        return {
+            positions,
+            cov3d,
+            colors,
+            count: this.numVertices
+        };
     }
-    private parseASCII(buffer: ArrayBuffer, headerEndIndex: number): any[] {
+
+    private parseASCII(buffer: ArrayBuffer): GaussianBuffers {
         const decoder = new TextDecoder();
-        const text = decoder.decode(buffer.slice(headerEndIndex));
+        const headerEndIndex = this.headerLength - 11;
+        const text = decoder.decode(buffer.slice(headerEndIndex + 11));
         const lines = text.trim().split('\n');
 
-        const vertices: any[] = [];
-
-        for (let v = 0; v < this.numVertices; v++) {
-            const vertex: any = {};
-            const tokens = lines[v].split(/\s+/);
-            for (let j = 0; j < this.properties.length; j++) {
-                vertex[this.properties[j].name] = parseFloat(tokens[j]);
-            }
-            vertices.push(vertex);
-        }
-
-        return vertices;
-    }
-    private splatifyVertices(vertices: any[]) {
         const SH_C0 = 0.28209479177387814;
-        const splattedVertices: Gaussian[] = [];
 
-        for (const vertex of vertices) {
-            const position = new Float32Array([vertex.x, vertex.y, vertex.z])
-            const rotation = vec4.create(vertex.rot_0, vertex.rot_1, vertex.rot_2, vertex.rot_3);
-            const scale = vec4.create(Math.exp(vertex.scale_0),
-                    Math.exp(vertex.scale_1),
-                    Math.exp(vertex.scale_2));
-            const color = vec3.create(0.5 + SH_C0 * vertex.f_dc_0,
-                    0.5 + SH_C0 * vertex.f_dc_1,
-                    0.5 + SH_C0 * vertex.f_dc_2)
-            const opacity = 1.0 / (1.0 + Math.exp(-vertex.opacity));
-            const splattedVertex = new Gaussian(position, rotation, scale, color, opacity);
-            
-            splattedVertices.push(splattedVertex);
+        const positions = new Float32Array(this.numVertices * 4);
+        const cov3d = new Float32Array(this.numVertices * 8);
+        const colors = new Float32Array(this.numVertices * 4);
+
+        for (let v = 0; v < this.numVertices && v < lines.length; v++) {
+            const tokens = lines[v].split(/\s+/).filter(t => t.length > 0);
+            if (tokens.length < this.properties.length) continue;
+
+            const values: number[] = tokens.map(t => parseFloat(t));
+
+            const x = values[0];
+            const y = values[1];
+            const z = values[2];
+
+            const rot_0 = values[3];
+            const rot_1 = values[4];
+            const rot_2 = values[5];
+            const rot_3 = values[6];
+
+            const scale_0 = Math.exp(values[7]);
+            const scale_1 = Math.exp(values[8]);
+            const scale_2 = Math.exp(values[9]);
+
+            const f_dc_0 = values[10];
+            const f_dc_1 = values[11];
+            const f_dc_2 = values[12];
+
+            const opacity = 1.0 / (1.0 + Math.exp(-values[13]));
+
+            // write positions
+            positions[v * 4 + 0] = x;
+            positions[v * 4 + 1] = y;
+            positions[v * 4 + 2] = z;
+            positions[v * 4 + 3] = 0.0;
+
+            // compute covariance matrix from rot and scale
+            const q_len = Math.sqrt(rot_0 * rot_0 + rot_1 * rot_1 + rot_2 * rot_2 + rot_3 * rot_3);
+            const q0 = rot_0 / q_len;
+            const q1 = rot_1 / q_len;
+            const q2 = rot_2 / q_len;
+            const q3 = rot_3 / q_len;
+
+            const r00 = 1 - 2 * (q2 * q2 + q3 * q3);
+            const r01 = 2 * (q1 * q2 - q0 * q3);
+            const r02 = 2 * (q1 * q3 + q0 * q2);
+
+            const r10 = 2 * (q1 * q2 + q0 * q3);
+            const r11 = 1 - 2 * (q1 * q1 + q3 * q3);
+            const r12 = 2 * (q2 * q3 - q0 * q1);
+
+            const r20 = 2 * (q1 * q3 - q0 * q2);
+            const r21 = 2 * (q2 * q3 + q0 * q1);
+            const r22 = 1 - 2 * (q1 * q1 + q2 * q2);
+
+            const s0 = scale_0;
+            const s1 = scale_1;
+            const s2 = scale_2;
+
+            const t00 = r00 * s0;
+            const t01 = r01 * s1;
+            const t02 = r02 * s2;
+            const t10 = r10 * s0;
+            const t11 = r11 * s1;
+            const t12 = r12 * s2;
+            const t20 = r20 * s0;
+            const t21 = r21 * s1;
+            const t22 = r22 * s2;
+
+            const c_xx = t00 * t00 + t01 * t01 + t02 * t02;
+            const c_xy = t00 * t10 + t01 * t11 + t02 * t12;
+            const c_xz = t00 * t20 + t01 * t21 + t02 * t22;
+            const c_yy = t10 * t10 + t11 * t11 + t12 * t12;
+            const c_yz = t10 * t20 + t11 * t21 + t12 * t22;
+            const c_zz = t20 * t20 + t21 * t21 + t22 * t22;
+
+            // write cov3d
+            cov3d[v * 8 + 0] = c_xx;
+            cov3d[v * 8 + 1] = c_xy;
+            cov3d[v * 8 + 2] = c_xz;
+            cov3d[v * 8 + 3] = c_yy;
+            cov3d[v * 8 + 4] = c_yz;
+            cov3d[v * 8 + 5] = c_zz;
+            cov3d[v * 8 + 6] = 0.0;
+            cov3d[v * 8 + 7] = 0.0;
+
+            // write colors
+            colors[v * 4 + 0] = 0.5 + SH_C0 * f_dc_0;
+            colors[v * 4 + 1] = 0.5 + SH_C0 * f_dc_1;
+            colors[v * 4 + 2] = 0.5 + SH_C0 * f_dc_2;
+            colors[v * 4 + 3] = opacity;
         }
 
-        return splattedVertices;
-    }
-
-    
-    private readBinaryValue(dataView: DataView, offset: number, type: string): number {
-        switch (type) {
-            case 'float':
-            case 'float32':
-                return dataView.getFloat32(offset, true);
-            case 'float64':
-            case 'double':
-                return dataView.getFloat64(offset, true);
-            case 'int8':
-                return dataView.getInt8(offset);
-            case 'uint8':
-                return dataView.getUint8(offset);
-            case 'int16':
-                return dataView.getInt16(offset, true);
-            case 'uint16':
-                return dataView.getUint16(offset, true);
-            case 'int32':
-                return dataView.getInt32(offset, true);
-            case 'uint32':
-                return dataView.getUint32(offset, true);
-            default:
-                throw new Error(`Unsupported binary type: ${type}`);
-        }
+        return {
+            positions,
+            cov3d,
+            colors,
+            count: this.numVertices
+        };
     }
 
     private getTypeSize(type: string): number {
@@ -269,9 +329,5 @@ export class PlyLoader {
             default:
                 throw new Error(`Unknown type size for: ${type}`);
         }
-    }
-    
-    getSplattifiedVertices(): Gaussian[] {
-        return this.splattifiedVertices;
     }
 }
