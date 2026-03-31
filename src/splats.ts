@@ -128,7 +128,7 @@ export class Splats {
                 },
                 color: {
                     operation: "add",
-                    srcFactor: 'src-alpha',
+                    srcFactor: 'one',
                     dstFactor: 'one-minus-src-alpha',
                 }
             }

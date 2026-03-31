@@ -101,11 +101,11 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let d = in.uv.x * in.uv.x + in.uv.y * in.uv.y;
-    if (d > 1.0) {
+    let d = dot(in.uv * 2.0, in.uv * 2.0);
+    if (d > 4.0) {
         discard;
     }
-    let alpha = exp(-d * 4.0) * in.color.a;
+    let alpha = exp(-d) * in.color.a;
     return vec4<f32>(in.color.rgb * alpha, alpha);
 }
 `;
