@@ -5,7 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(({mode}) => {
   return {
-    base: mode === 'production' ? '/web-gi-renderer/' : '/',
+    base: '/',
     plugins: [react(), tailwindcss()],
     define: {},
     resolve: {
