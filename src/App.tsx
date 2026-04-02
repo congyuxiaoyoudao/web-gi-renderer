@@ -26,6 +26,27 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
 }
 
 function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void }) {
+  const perfRef = useRef({ frames: 0, prevTime: performance.now() });
+
+  useFrame(() => {
+    perfRef.current.frames++;
+    const time = performance.now();
+    if (time >= perfRef.current.prevTime + 1000) {
+      const fps = Math.round((perfRef.current.frames * 1000) / (time - perfRef.current.prevTime));
+      perfRef.current.frames = 0;
+      perfRef.current.prevTime = time;
+      
+      const memory = (performance as any).memory;
+      const memoryUsage = memory ? `${Math.round(memory.usedJSHeapSize / 1048576)} MB / ${Math.round(memory.totalJSHeapSize / 1048576)} MB` : 'N/A';
+      
+      const fpsEl = document.getElementById('perf-fps');
+      if (fpsEl) fpsEl.innerText = `${fps} FPS`;
+      
+      const memEl = document.getElementById('perf-memory');
+      if (memEl) memEl.innerText = memoryUsage;
+    }
+  });
+
   const camera = useFrame((state) => {
     if (onCameraReady && state.camera) {
       onCameraReady(state.camera as THREE.PerspectiveCamera);
@@ -139,6 +160,14 @@ export default function App() {
         <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">WebGPU PBR & GI</h1>
         <p className="text-zinc-400 text-sm mt-2 max-w-md">
           Real-time physically based rendering with global illumination (IBL) powered by React Three Fiber and Three.js WebGPU Renderer.
+        </p>
+      </div>
+      <div className="absolute bottom-6 left-6 z-10 text-white font-sans pointer-events-none">
+        <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500" id="perf-fps">
+          0 FPS
+        </h2>
+        <p className="text-zinc-400 text-sm mt-2 max-w-md">
+          Memory: <span id="perf-memory">N/A</span>
         </p>
       </div>
       <Canvas
