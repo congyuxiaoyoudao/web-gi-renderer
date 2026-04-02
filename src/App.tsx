@@ -40,16 +40,16 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
       {/* <Environment files="https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/potsdamer_platz_1k.hdr" background blur={0.0} /> */}
       <Environment
         files={[
-          '/assets/px.jpg',
-          '/assets/nx.jpg',
-          '/assets/py.jpg',
-          '/assets/ny.jpg',
-          '/assets/pz.jpg',
-          '/assets/nz.jpg',
+          'assets/px.jpg',
+          'assets/nx.jpg',
+          'assets/py.jpg',
+          'assets/ny.jpg',
+          'assets/pz.jpg',
+          'assets/nz.jpg',
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url="/assets/food.ply" />
+      <WebGPUSplat url="assets/food.ply" />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
