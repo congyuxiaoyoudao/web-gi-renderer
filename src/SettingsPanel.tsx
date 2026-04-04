@@ -7,7 +7,7 @@ export const CAMERA_PRESETS = [
 ];
 
 export function useSettings() {
-  const { sphereColor, cameraPreset } = useControls({
+  const { sphereColor, cameraPreset, splatRadius } = useControls({
     sphereColor: {
       value: '#ff0055',
       label: 'Sphere Color',
@@ -20,7 +20,14 @@ export function useSettings() {
       }, {} as Record<string, number>),
       label: 'Camera Position',
     },
+    splatRadius: {
+      value: 0.7,
+      min: 0.1,
+      max: 1,
+      step: 0.1,
+      label: 'Splat Radius',
+    },
   });
 
-  return { sphereColor, cameraPreset };
+  return { sphereColor, cameraPreset, splatRadius };
 }

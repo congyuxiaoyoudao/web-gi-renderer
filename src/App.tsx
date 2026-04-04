@@ -25,7 +25,7 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void }) {
+function Scene({ sphereColor, splatRadius, onCameraReady }: { sphereColor: string; splatRadius: number; onCameraReady?: (cam: THREE.PerspectiveCamera) => void }) {
   const camera = useFrame((state) => {
     if (onCameraReady && state.camera) {
       onCameraReady(state.camera as THREE.PerspectiveCamera);
@@ -49,7 +49,7 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url="assets/food.ply" />
+      <WebGPUSplat url="assets/food.ply" splatRadius={splatRadius} />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
@@ -115,7 +115,7 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset } = useSettings();
+  const { sphereColor, cameraPreset, splatRadius } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -167,7 +167,7 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene sphereColor={sphereColor} onCameraReady={setCamera} />
+          <Scene sphereColor={sphereColor} splatRadius={splatRadius} onCameraReady={setCamera} />
         </Suspense>
       </Canvas>
       <Leva />
