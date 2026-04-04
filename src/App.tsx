@@ -25,7 +25,7 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void }) {
+function Scene({ sphereColor, sortMethod, onCameraReady }: { sphereColor: string; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void }) {
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
 
   useFrame(() => {
@@ -44,6 +44,9 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
       
       const memEl = document.getElementById('perf-memory');
       if (memEl) memEl.innerText = memoryUsage;
+
+      const sortEl = document.getElementById('perf-sort-method');
+      if (sortEl) sortEl.innerText = sortMethod;
     }
   });
 
@@ -70,7 +73,7 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url="/assets/food.ply" />
+      <WebGPUSplat url="/assets/food.ply" sortMethod={sortMethod} />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
@@ -136,7 +139,7 @@ function Scene({ sphereColor, onCameraReady }: { sphereColor: string; onCameraRe
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset } = useSettings();
+  const { sphereColor, cameraPreset, sortMethod } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -169,6 +172,9 @@ export default function App() {
         <p className="text-zinc-400 text-sm mt-2 max-w-md">
           Memory: <span id="perf-memory">N/A</span>
         </p>
+        <p className="text-zinc-400 text-sm mt-2 max-w-md">
+          Sort Method: <span id="perf-sort-method">{sortMethod}</span>
+        </p>
       </div>
       <Canvas
         shadows
@@ -196,7 +202,7 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene sphereColor={sphereColor} onCameraReady={setCamera} />
+          <Scene sphereColor={sphereColor} sortMethod={sortMethod} onCameraReady={setCamera} />
         </Suspense>
       </Canvas>
       <Leva />

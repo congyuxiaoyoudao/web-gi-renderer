@@ -4,7 +4,7 @@ import { PlyLoader } from './loadPly';
 import { Splats } from './splats';
 import { mat4, vec3 } from 'wgpu-matrix';
 
-export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius?: number }) {
+export function WebGPUSplat({ url, splatRadius = 1, sortMethod = 'GPU' }: { url: string, splatRadius?: number, sortMethod?: string }) {
   const { gl, camera, size } = useThree();
   const [splats, setSplats] = useState<Splats | null>(null);
   const [viewParamBindGroup, setViewParamBindGroup] = useState<GPUBindGroup | null>(null);
@@ -105,7 +105,7 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
       let shouldUpdate = false;
       const camPos = vec3.create(camera.position.x, camera.position.y, camera.position.z);
       const camRot = vec3.create(camera.rotation.x, camera.rotation.y, camera.rotation.z);
-      
+
       if(vec3.distance(lastCamPos.current, camPos) > 0.1 || vec3.distance(lastCamRot.current, camRot) > 0.1){
           vec3.copy(camPos, lastCamPos.current);
           vec3.copy(camRot, lastCamRot.current);
@@ -126,10 +126,15 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
 
       let visibleCount: number | null = null;
       if (shouldUpdate) {
-        visibleCount = splats.updateSplatIndexBuffer(device, projection, modelView, commandEncoder);
+        if (sortMethod === 'GPU') {
+          splats.updateSplatIndexBufferGPU(device, modelView, commandEncoder);
+          visibleCount = splats['_numVertices'];
+        } else {
+          visibleCount = splats.updateSplatIndexBuffer(device, projection, modelView, commandEncoder);
+        }
+
         if (visibleCount !== null) {
           visibleCountRef.current = visibleCount;
-          console.log(`Rendering ${visibleCount} splats out of ${splats['_numVertices']} total (${Math.round(visibleCount / splats['_numVertices'] * 100)}% visible)`);
         }
       }
 

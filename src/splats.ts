@@ -1,6 +1,7 @@
 import { GaussianBuffers } from './loadPly';
 import type { Mat4 } from 'wgpu-matrix'
 import splat_shader from './splat_shader';
+import sort_shader from './bitonic_shader';
 
 export class Splats {
     private _renderPipeline: GPURenderPipeline;
@@ -10,6 +11,16 @@ export class Splats {
     private _splatIdsBuffer: GPUBuffer;
     private _cov3dBuffer: GPUBuffer;
     private _positionsBuffer: Float32Array;
+
+    // GPU Compute resources for sorting
+    private _computeDistancesPipeline!: GPUComputePipeline;
+    private _bitonicSortPipeline!: GPUComputePipeline;
+    private _sortUniformsBuffer!: GPUBuffer;
+    private _sortStepUniformsBuffer!: GPUBuffer;
+    private _sortBindGroup0!: GPUBindGroup;
+    private _sortBindGroup1!: GPUBindGroup;
+    private _numPasses!: number;
+    private _paddedVertices!: number;
 
     constructor(device: GPUDevice, vertices: GaussianBuffers, viewParamsBindGroupLayout: GPUBindGroupLayout, format: GPUTextureFormat, depthFormat?: GPUTextureFormat) {
         const shaderModule = device.createShaderModule({
@@ -100,9 +111,13 @@ export class Splats {
         };
 
         const splatIds = new Uint32Array(vertices.count).fill(0).map((_, i) => i);
+
+        this._numVertices = vertices.count;
+        this._paddedVertices = Math.max(2, Math.pow(2, Math.ceil(Math.log2(this._numVertices))));
+
         const splatIdsBuffer = device.createBuffer({
-            size: Uint32Array.BYTES_PER_ELEMENT * vertices.count,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+            size: Uint32Array.BYTES_PER_ELEMENT * this._paddedVertices,
+            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
         });
         device.queue.writeBuffer(splatIdsBuffer, 0, splatIds.buffer, splatIds.byteOffset, splatIds.byteLength);
 
@@ -172,6 +187,92 @@ export class Splats {
         this._splatIdsBuffer = splatIdsBuffer;
         this._positionsBuffer = positions;
         this._cov3dBuffer = cov3dBuffer;
+
+        // --- Compute Pipelines for Sorting ---
+        const sortShaderModule = device.createShaderModule({
+            code: sort_shader
+        });
+
+        const distancesBuffer = device.createBuffer({
+            size: this._paddedVertices * Float32Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        this._sortUniformsBuffer = device.createBuffer({
+            size: 80, // 16 * 4 (mat4) + 2 * 4 (uints) + 8 (padding) = 80 bytes
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        this._numPasses = (Math.log2(this._paddedVertices) * (Math.log2(this._paddedVertices) + 1)) / 2;
+        this._sortStepUniformsBuffer = device.createBuffer({
+            size: Math.max(256, this._numPasses * 256), // 256 bytes alignment per dynamic offset
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        // Pre-calculate all j, k pairs for the bitonic sort passes
+        const sortStepData = new ArrayBuffer(Math.max(256, this._numPasses * 256));
+        const sortStepView = new DataView(sortStepData);
+        let passIdx = 0;
+        for (let k = 2; k <= this._paddedVertices; k *= 2) {
+            for (let j = k / 2; j >= 1; j = Math.floor(j / 2)) {
+                sortStepView.setUint32(passIdx * 256, j, true);
+                sortStepView.setUint32(passIdx * 256 + 4, k, true);
+                passIdx++;
+            }
+        }
+        device.queue.writeBuffer(this._sortStepUniformsBuffer, 0, sortStepData);
+
+        const sortBindGroupLayout0 = device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+                { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+                { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            ]
+        });
+
+        const sortBindGroupLayout1 = device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true } },
+            ]
+        });
+
+        this._computeDistancesPipeline = device.createComputePipeline({
+            layout: device.createPipelineLayout({
+                bindGroupLayouts: [sortBindGroupLayout0]
+            }),
+            compute: {
+                module: sortShaderModule,
+                entryPoint: 'compute_distances',
+            },
+        });
+
+        this._bitonicSortPipeline = device.createComputePipeline({
+            layout: device.createPipelineLayout({
+                bindGroupLayouts: [sortBindGroupLayout0, sortBindGroupLayout1]
+            }),
+            compute: {
+                module: sortShaderModule,
+                entryPoint: 'bitonic_sort',
+            },
+        });
+
+        this._sortBindGroup0 = device.createBindGroup({
+            layout: sortBindGroupLayout0,
+            entries: [
+                { binding: 0, resource: { buffer: this._sortUniformsBuffer } },
+                { binding: 1, resource: { buffer: positionsBuffer } },
+                { binding: 2, resource: { buffer: distancesBuffer } },
+                { binding: 3, resource: { buffer: splatIdsBuffer } },
+            ],
+        });
+
+        this._sortBindGroup1 = device.createBindGroup({
+            layout: sortBindGroupLayout1,
+            entries: [
+                { binding: 0, resource: { buffer: this._sortStepUniformsBuffer, size: 8 } },
+            ],
+        });
     }
 
     public updateSplatIndexBuffer(device: GPUDevice, projectionMatrix: Mat4, modelViewMatrix: Mat4, commandEncoder: GPUCommandEncoder) {
@@ -218,6 +319,36 @@ export class Splats {
 
         // Return the number of visible splats for rendering
         return visibleIndices.length;
+    }
+
+    public updateSplatIndexBufferGPU(device: GPUDevice, modelViewMatrix: Mat4, commandEncoder: GPUCommandEncoder) {
+        // Update uniforms for compute distances
+        const uniformsData = new ArrayBuffer(80);
+        const uniformsFloat = new Float32Array(uniformsData, 0, 16);
+        const uniformsUint = new Uint32Array(uniformsData, 16 * 4, 2);
+
+        uniformsFloat.set(modelViewMatrix);
+        uniformsUint[0] = this._numVertices;
+        uniformsUint[1] = this._paddedVertices;
+
+        device.queue.writeBuffer(this._sortUniformsBuffer, 0, uniformsData);
+
+        const computePass = commandEncoder.beginComputePass();
+        computePass.setPipeline(this._computeDistancesPipeline);
+        computePass.setBindGroup(0, this._sortBindGroup0);
+        computePass.dispatchWorkgroups(Math.ceil(this._paddedVertices / 256));
+        computePass.setPipeline(this._bitonicSortPipeline);
+        
+        let passIdx = 0;
+        for (let k = 2; k <= this._paddedVertices; k *= 2) {
+            for (let j = k / 2; j >= 1; j = Math.floor(j / 2)) {
+                computePass.setBindGroup(1, this._sortBindGroup1, [passIdx * 256]);
+                computePass.dispatchWorkgroups(Math.ceil(this._paddedVertices / 256));
+                passIdx++;
+            }
+        }
+
+        computePass.end();
     }
 
     public render(renderPass: GPURenderPassEncoder, viewParamsBindGroup: GPUBindGroup, numSplats?: number) {

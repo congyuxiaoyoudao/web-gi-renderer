@@ -7,7 +7,7 @@ export const CAMERA_PRESETS = [
 ];
 
 export function useSettings() {
-  const { sphereColor, cameraPreset } = useControls({
+  const { sphereColor, cameraPreset, sortMethod } = useControls({
     sphereColor: {
       value: '#ff0055',
       label: 'Sphere Color',
@@ -20,7 +20,12 @@ export function useSettings() {
       }, {} as Record<string, number>),
       label: 'Camera Position',
     },
+    sortMethod: {
+      value: 'GPU',
+      options: ['CPU', 'GPU'],
+      label: 'Sort Method',
+    },
   });
 
-  return { sphereColor, cameraPreset };
+  return { sphereColor, cameraPreset, sortMethod };
 }
