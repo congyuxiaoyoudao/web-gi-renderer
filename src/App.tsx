@@ -4,7 +4,7 @@ import { Leva } from 'leva';
 import { WebGPURenderer } from 'three/webgpu';
 import { Suspense, useRef, useState, useEffect } from 'react';
 import * as THREE from 'three';
-import { CAMERA_PRESETS, useSettings } from '@/src/SettingsPanel';
+import { CAMERA_PRESETS, useSettings, GAUSSIAN_SCENES } from '@/src/SettingsPanel';
 import { WebGPUSplat } from './WebGPUSplat';
 import Loader from './Loader';
 
@@ -25,7 +25,7 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, splatRadius, onCameraReady }: { sphereColor: string; splatRadius: number; onCameraReady?: (cam: THREE.PerspectiveCamera) => void }) {
+function Scene({ sphereColor, splatRadius, onCameraReady, gaussianUrl }: { sphereColor: string; splatRadius: number; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string }) {
   const camera = useFrame((state) => {
     if (onCameraReady && state.camera) {
       onCameraReady(state.camera as THREE.PerspectiveCamera);
@@ -49,7 +49,7 @@ function Scene({ sphereColor, splatRadius, onCameraReady }: { sphereColor: strin
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url="assets/food.ply" splatRadius={splatRadius} />
+      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
@@ -115,9 +115,10 @@ function Scene({ sphereColor, splatRadius, onCameraReady }: { sphereColor: strin
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset, splatRadius } = useSettings();
+  const { sphereColor, cameraPreset, splatRadius, sceneIndex } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
+  const gaussianScene = GAUSSIAN_SCENES[sceneIndex];
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 1000);
@@ -167,7 +168,7 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene sphereColor={sphereColor} splatRadius={splatRadius} onCameraReady={setCamera} />
+          <Scene sphereColor={sphereColor} splatRadius={splatRadius} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} />
         </Suspense>
       </Canvas>
       <Leva />

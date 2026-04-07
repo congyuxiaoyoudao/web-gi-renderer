@@ -6,8 +6,24 @@ export const CAMERA_PRESETS = [
   { name: 'Side View', position: [8, 2, 0] },
 ];
 
+export const GAUSSIAN_SCENES = [
+  { name: 'Food', url: 'assets/food.ply' },
+  { 
+    name: 'Bicycle (HuggingFace)',
+    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bicycle/point_cloud/iteration_7000/point_cloud.ply'
+  },
+  { 
+    name: 'Bonsai (HuggingFace)',
+    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bonsai/point_cloud/iteration_7000/point_cloud.ply'
+  },
+  { 
+    name: 'Stump (HuggingFace)',
+    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/stump/point_cloud/iteration_7000/point_cloud.ply'
+  },
+];
+
 export function useSettings() {
-  const { sphereColor, cameraPreset, splatRadius } = useControls({
+  const { sphereColor, cameraPreset, splatRadius, sceneIndex } = useControls({
     sphereColor: {
       value: '#ff0055',
       label: 'Sphere Color',
@@ -27,7 +43,15 @@ export function useSettings() {
       step: 0.1,
       label: 'Splat Radius',
     },
+    sceneIndex: {
+      value: 0,
+      options: GAUSSIAN_SCENES.reduce((acc, scene, index) => {
+        acc[scene.name] = index;
+        return acc;
+      }, {} as Record<string, number>),
+      label: 'Gaussian Scene',
+    },
   });
 
-  return { sphereColor, cameraPreset, splatRadius };
+  return { sphereColor, cameraPreset, splatRadius, sceneIndex };
 }
