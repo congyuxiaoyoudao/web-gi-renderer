@@ -15,10 +15,15 @@ struct ViewParams {
 @group(1) @binding(1) var<storage, read> cov3d_buffer: array<vec4<f32>>;
 @group(1) @binding(2) var<storage, read> colors: array<vec4<f32>>;
 
+// Depth texture and sampler for depth testing against Three.js scene
+@group(2) @binding(0) var depthTexture: texture_depth_2d;
+@group(2) @binding(1) var depthSampler: sampler_comparison;
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) uv: vec2<f32>,
+    @location(2) ndc_depth: f32,
 };
 
 @vertex
@@ -27,15 +32,19 @@ fn vs_main(
     @location(1) splatId: u32,
 ) -> VertexOutput {
     var out: VertexOutput;
-    
+
     let pos3d = positions[splatId].xyz;
     let viewPos = modelView * vec4<f32>(pos3d, 1.0);
     let clipPos = projection * viewPos;
-    
+
+    // Store NDC depth for depth texture comparison
+    // WebGPU NDC depth is in [0, 1] range after perspective divide
+    out.ndc_depth = clipPos.z / clipPos.w;
+
     // Read 3D covariance
     let cov_part1 = cov3d_buffer[splatId * 2];
     let cov_part2 = cov3d_buffer[splatId * 2 + 1];
-    
+
     let cov3d = mat3x3<f32>(
         vec3<f32>(cov_part1.x, cov_part1.y, cov_part1.z),
         vec3<f32>(cov_part1.y, cov_part1.w, cov_part2.x),
@@ -84,18 +93,18 @@ fn vs_main(
     let maxSplatRadius = 1024.0;
     let basis1 = eigenVector_1 * min(sqrt(lambda_1) * 4.0 * splatRadius, maxSplatRadius);
     let basis2 = eigenVector_2 * min(sqrt(lambda_2) * 4.0 * splatRadius, maxSplatRadius);
-    
+
     // splatPos is in [-1, 1]
     let offset_pixels = splatPos.x * basis1 + splatPos.y * basis2;
-    
+
     // Convert pixels to clip space
     // clip space is [-1, 1] x [-1, 1]
     let offset_clip = (offset_pixels / screenSize) * 2.0 * clipPos.w;
-    
+
     out.clip_position = vec4<f32>(clipPos.xy + offset_clip, clipPos.z, clipPos.w);
     out.color = colors[splatId];
     out.uv = splatPos;
-    
+
     return out;
 }
 
@@ -105,6 +114,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (d > 4.0) {
         discard;
     }
+
+    // Depth test: compare splat depth against stored depth from Three.js scene
+    // Convert clip position to UV coordinates [0, 1]
+    let uv = in.clip_position.xy * 0.5 + 0.5;
+
+    // Sample depth texture and compare
+    // textureSampleCompareLevel returns 1.0 if depth test passes, 0.0 otherwise
+    // We use less-equal comparison: splat passes if its depth <= stored depth
+    let depthCompare = textureSampleCompareLevel(depthTexture, depthSampler, uv, in.ndc_depth);
+
+    // If depth test fails (stored depth is closer), discard this fragment
+    if (depthCompare == 0.0) {
+        discard;
+    }
+
     let alpha = exp(-d) * in.color.a;
     return vec4<f32>(in.color.rgb * alpha, alpha);
 }

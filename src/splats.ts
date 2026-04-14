@@ -11,7 +11,13 @@ export class Splats {
     private _cov3dBuffer: GPUBuffer;
     private _positionsBuffer: Float32Array;
 
-    constructor(device: GPUDevice, vertices: GaussianBuffers, viewParamsBindGroupLayout: GPUBindGroupLayout, format: GPUTextureFormat, depthFormat?: GPUTextureFormat) {
+    constructor(
+        device: GPUDevice,
+        vertices: GaussianBuffers,
+        viewParamsBindGroupLayout: GPUBindGroupLayout,
+        format: GPUTextureFormat,
+        depthBindGroupLayout?: GPUBindGroupLayout
+    ) {
         const shaderModule = device.createShaderModule({
             code: splat_shader
         });
@@ -134,9 +140,15 @@ export class Splats {
             }
         };
 
+        // Build bind group layouts array for pipeline
+        const bindGroupLayouts = [viewParamsBindGroupLayout, splatBindGroupLayout];
+        if (depthBindGroupLayout) {
+            bindGroupLayouts.push(depthBindGroupLayout);
+        }
+
         const renderPipeline = device.createRenderPipeline({
             layout: device.createPipelineLayout({
-                bindGroupLayouts:[viewParamsBindGroupLayout, splatBindGroupLayout]
+                bindGroupLayouts: bindGroupLayouts
             }),
             vertex: {
                 module: shaderModule,
@@ -155,14 +167,9 @@ export class Splats {
                 topology: 'triangle-strip',
                 frontFace: 'ccw',
                 cullMode: 'none'
-            },
-            ...(depthFormat ? {
-                depthStencil: {
-                    format: depthFormat,
-                    depthWriteEnabled: false,
-                    depthCompare: 'less-equal'
-                }
-            } : {})
+            }
+            // Note: depth testing is done manually in the fragment shader
+            // using textureSampleCompareLevel against the depth texture
         });
 
         this._renderPipeline = renderPipeline;
@@ -220,10 +227,14 @@ export class Splats {
         return visibleIndices.length;
     }
 
-    public render(renderPass: GPURenderPassEncoder, viewParamsBindGroup: GPUBindGroup, numSplats?: number) {
+    public render(renderPass: GPURenderPassEncoder, viewParamsBindGroup: GPUBindGroup, numSplats?: number, depthBindGroup?: GPUBindGroup) {
         renderPass.setPipeline(this._renderPipeline);
         renderPass.setBindGroup(0, viewParamsBindGroup);
         renderPass.setBindGroup(1, this._splatBindGroup);
+        // Set depth bind group if available (group 2)
+        if (depthBindGroup) {
+            renderPass.setBindGroup(2, depthBindGroup);
+        }
         renderPass.setVertexBuffer(0, this._splatPositionBuffer);
         renderPass.setVertexBuffer(1, this._splatIdsBuffer);
         // Draw visible splats (or all if numSplats not specified)
