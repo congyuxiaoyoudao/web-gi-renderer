@@ -4,12 +4,14 @@ struct ViewParams {
     modelView: mat4x4<f32>,
     screenSize: vec2<f32>,
     splatRadius: f32,
+    debugDepth: f32,
 };
 
 @group(0) @binding(0) var<uniform> projection: mat4x4<f32>;
 @group(0) @binding(1) var<uniform> modelView: mat4x4<f32>;
 @group(0) @binding(2) var<uniform> screenSize: vec2<f32>;
 @group(0) @binding(3) var<uniform> splatRadius: f32;
+@group(0) @binding(4) var<uniform> debugDepth: f32;
 
 @group(1) @binding(0) var<storage, read> positions: array<vec4<f32>>;
 @group(1) @binding(1) var<storage, read> cov3d_buffer: array<vec4<f32>>;
@@ -126,7 +128,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // If depth test fails (stored depth is closer), discard this fragment
     if (depthCompare == 0.0) {
+        // In debug mode, show occluded splats in bright red
+        if (debugDepth > 0.5) {
+            let debugColor = vec4<f32>(1.0, 0.0, 0.0, 0.8);  // Bright red with alpha
+            return debugColor;
+        }
         discard;
+    }
+
+    // In debug mode, visualize depth as color gradient
+    if (debugDepth > 0.5) {
+        // Map depth to color: near = green, far = blue
+        let depthColor = vec3<f32>(0.0, 1.0 - in.ndc_depth, in.ndc_depth);
+        let alpha = exp(-d) * in.color.a;
+        return vec4<f32>(depthColor * alpha, alpha);
     }
 
     let alpha = exp(-d) * in.color.a;

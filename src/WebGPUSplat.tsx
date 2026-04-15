@@ -3,7 +3,8 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { PlyLoader } from './loadPly';
 import { Splats } from './splats';
 import { vec3 } from 'wgpu-matrix';
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { clipSpace, vec4, mix } from 'three/tsl';
 
 // Depth-only material for prepass - writes to depth buffer only
 const depthMaterial = new THREE.MeshBasicMaterial({
@@ -12,7 +13,24 @@ const depthMaterial = new THREE.MeshBasicMaterial({
   depthTest: true
 });
 
-export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius?: number }) {
+// Depth visualization material using TSL for WebGPU compatibility
+const depthVisualizeMaterial = new THREE.MeshBasicNodeMaterial({
+  colorNode: mix(
+    vec4(1, 0.27, 0, 1),
+    vec4(0, 0.52, 0.8, 1),
+    clipSpace.z.div(clipSpace.w).mul(0.5).add(0.5)  // NDC depth in [0, 1]
+  )
+});
+
+export function WebGPUSplat({
+  url,
+  splatRadius = 1,
+  debugDepth = false
+}: {
+  url: string,
+  splatRadius?: number,
+  debugDepth?: boolean
+}) {
   const { gl, camera, size, scene } = useThree();
   const [splats, setSplats] = useState<Splats | null>(null);
   const [viewParamBindGroup, setViewParamBindGroup] = useState<GPUBindGroup | null>(null);
@@ -21,7 +39,6 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
   const depthSamplerRef = useRef<GPUSampler | null>(null);
   const depthTextureRef = useRef<GPUTexture | null>(null);
   const depthTextureViewRef = useRef<GPUTextureView | null>(null);
-  const depthBindGroupRef = useRef<GPUBindGroup | null>(null);
 
   // Three.js render target for depth prepass
   const depthRenderTargetRef = useRef<THREE.RenderTarget | null>(null);
@@ -71,7 +88,8 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
           { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
           { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
           { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
-          { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} }
+          { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
+          { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: {type: 'uniform'} }
         ],
       });
 
@@ -95,17 +113,23 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
+      const debugDepthBuffer = device.createBuffer({
+        size: Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+
       const bindGroup = device.createBindGroup({
         layout: viewParamBindGroupLayout,
         entries: [
           { binding: 0, resource: {buffer: projectionBuffer} },
           { binding: 1, resource: {buffer: modelViewBuffer} },
           { binding: 2, resource: {buffer: screenSizeBuffer} },
-          { binding: 3, resource: {buffer: splatRadiusBuffer} }
+          { binding: 3, resource: {buffer: splatRadiusBuffer} },
+          { binding: 4, resource: {buffer: debugDepthBuffer} }
         ],
       });
 
-      buffersRef.current = { projectionBuffer, screenSizeBuffer, modelViewBuffer, splatRadiusBuffer };
+      buffersRef.current = { projectionBuffer, screenSizeBuffer, modelViewBuffer, splatRadiusBuffer, debugDepthBuffer };
       setViewParamBindGroup(bindGroup);
 
       try {
@@ -139,7 +163,7 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
   const visibleCountRef = useRef<number>(0);
 
   // Render with depth testing against Three.js scene
-  useFrame(async (state) => {
+  useFrame((state) => {
     const { camera, scene } = state;
     try {
       if (!splats || !viewParamBindGroup) return;
@@ -174,12 +198,12 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
       device.queue.writeBuffer(buffersRef.current.modelViewBuffer, 0, modelView);
       device.queue.writeBuffer(buffersRef.current.screenSizeBuffer, 0, new Float32Array([size.width, size.height]));
       device.queue.writeBuffer(buffersRef.current.splatRadiusBuffer, 0, new Float32Array([splatRadius]));
+      device.queue.writeBuffer(buffersRef.current.debugDepthBuffer, 0, new Float32Array([debugDepth ? 1.0 : 0.0]));
 
       const commandEncoder = device.createCommandEncoder();
 
-      // Step 1: Render scene depth to RenderTarget using Three.js
+      // Step 1: Render scene depth to RenderTarget (for depth testing)
       if (depthRenderTargetRef.current) {
-        // Set up depth-only rendering using scene.overrideMaterial
         const originalOverride = scene.overrideMaterial;
         scene.overrideMaterial = depthMaterial;
 
@@ -191,10 +215,9 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
           console.error('Failed to render depth prepass:', err);
         }
 
-        // Restore original override material
         scene.overrideMaterial = originalOverride;
 
-        // Get the GPU depth texture from the render target
+        // Get GPU depth texture from render target
         const depthTexture = depthRenderTargetRef.current.depthTexture;
         if (depthTexture) {
           const textureData = backend.get(depthTexture);
@@ -203,11 +226,15 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
           if (gpuTexture) {
             depthTextureRef.current = gpuTexture;
             depthTextureViewRef.current = gpuTexture.createView();
-          } else {
-            console.warn('Failed to get GPU depth texture from Three.js');
           }
         }
       }
+
+      // Step 2: Render scene to screen (normal or depth visualization)
+      const originalOverride = scene.overrideMaterial;
+      scene.overrideMaterial = debugDepth ? depthVisualizeMaterial : null;
+      (gl as any).render(scene, camera);
+      scene.overrideMaterial = originalOverride;
 
       let visibleCount: number | null = null;
       if (shouldUpdate) {
@@ -227,14 +254,13 @@ export function WebGPUSplat({ url, splatRadius = 1 }: { url: string, splatRadius
             { binding: 1, resource: depthSamplerRef.current }
           ]
         });
-        depthBindGroupRef.current = depthBindGroupForRender;
       }
 
-      // Render splats with depth testing
+      // Step 3: Render splats with depth testing
       const renderPassDesc: GPURenderPassDescriptor = {
         colorAttachments: [{
             view: context.getCurrentTexture().createView(),
-            loadOp: "load",
+            loadOp: "load",  // Load previous content (scene depth visualization)
             storeOp: "store"
         }]
       };
