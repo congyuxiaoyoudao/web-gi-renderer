@@ -22,7 +22,13 @@ export class Splats {
     private _numPasses!: number;
     private _paddedVertices!: number;
 
-    constructor(device: GPUDevice, vertices: GaussianBuffers, viewParamsBindGroupLayout: GPUBindGroupLayout, format: GPUTextureFormat, depthFormat?: GPUTextureFormat) {
+    constructor(
+        device: GPUDevice,
+        vertices: GaussianBuffers,
+        viewParamsBindGroupLayout: GPUBindGroupLayout,
+        format: GPUTextureFormat,
+        depthFormat: GPUTextureFormat = 'depth32float'
+    ) {
         const shaderModule = device.createShaderModule({
             code: splat_shader
         });
@@ -149,9 +155,12 @@ export class Splats {
             }
         };
 
+        // Build bind group layouts array for pipeline
+        const bindGroupLayouts = [viewParamsBindGroupLayout, splatBindGroupLayout];
+
         const renderPipeline = device.createRenderPipeline({
             layout: device.createPipelineLayout({
-                bindGroupLayouts:[viewParamsBindGroupLayout, splatBindGroupLayout]
+                bindGroupLayouts: bindGroupLayouts
             }),
             vertex: {
                 module: shaderModule,
@@ -171,13 +180,13 @@ export class Splats {
                 frontFace: 'ccw',
                 cullMode: 'none'
             },
-            ...(depthFormat ? {
-                depthStencil: {
-                    format: depthFormat,
-                    depthWriteEnabled: false,
-                    depthCompare: 'less-equal'
-                }
-            } : {})
+            // Use hardware depth testing against pre-rendered scene depth
+            // disable depthWrite because we only read depth, not write
+            depthStencil: {
+                depthWriteEnabled: false,
+                depthCompare: 'less-equal',
+                format: depthFormat
+            }
         });
 
         this._renderPipeline = renderPipeline;

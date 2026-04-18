@@ -8,22 +8,22 @@ export const CAMERA_PRESETS = [
 
 export const GAUSSIAN_SCENES = [
   { name: 'Food', url: 'assets/food.ply' },
-  { 
+  {
     name: 'Bicycle (HuggingFace)',
     url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bicycle/point_cloud/iteration_7000/point_cloud.ply'
   },
-  { 
+  {
     name: 'Bonsai (HuggingFace)',
     url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bonsai/point_cloud/iteration_7000/point_cloud.ply'
   },
-  { 
+  {
     name: 'Stump (HuggingFace)',
     url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/stump/point_cloud/iteration_7000/point_cloud.ply'
   },
 ];
 
 export function useSettings() {
-  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex } = useControls({
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth } = useControls({
     sphereColor: {
       value: '#ff0055',
       label: 'Sphere Color',
@@ -56,7 +56,11 @@ export function useSettings() {
       }, {} as Record<string, number>),
       label: 'Gaussian Scene',
     },
+    debugDepth: {
+      value: false,
+      label: 'Debug Depth',
+    },
   });
 
-  return { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex };
+  return { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth };
 }
