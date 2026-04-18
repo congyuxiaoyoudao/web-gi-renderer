@@ -4,7 +4,7 @@ import { Leva } from 'leva';
 import { WebGPURenderer } from 'three/webgpu';
 import { Suspense, useRef, useState, useEffect } from 'react';
 import * as THREE from 'three';
-import { CAMERA_PRESETS, useSettings } from '@/src/SettingsPanel';
+import { CAMERA_PRESETS, useSettings, GAUSSIAN_SCENES } from '@/src/SettingsPanel';
 import { WebGPUSplat } from './WebGPUSplat';
 import Loader from './Loader';
 
@@ -25,7 +25,7 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, sortMethod, onCameraReady }: { sphereColor: string; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void }) {
+function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string }) {
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
 
   useFrame(() => {
@@ -64,16 +64,16 @@ function Scene({ sphereColor, sortMethod, onCameraReady }: { sphereColor: string
       {/* <Environment files="https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/potsdamer_platz_1k.hdr" background blur={0.0} /> */}
       <Environment
         files={[
-          '/assets/px.jpg',
-          '/assets/nx.jpg',
-          '/assets/py.jpg',
-          '/assets/ny.jpg',
-          '/assets/pz.jpg',
-          '/assets/nz.jpg',
+          'assets/px.jpg',
+          'assets/nx.jpg',
+          'assets/py.jpg',
+          'assets/ny.jpg',
+          'assets/pz.jpg',
+          'assets/nz.jpg',
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url="/assets/food.ply" sortMethod={sortMethod} />
+      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
@@ -139,9 +139,10 @@ function Scene({ sphereColor, sortMethod, onCameraReady }: { sphereColor: string
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset, sortMethod } = useSettings();
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
+  const gaussianScene = GAUSSIAN_SCENES[sceneIndex];
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 1000);
@@ -202,7 +203,7 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene sphereColor={sphereColor} sortMethod={sortMethod} onCameraReady={setCamera} />
+          <Scene sphereColor={sphereColor} splatRadius={splatRadius} sortMethod={sortMethod} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} />
         </Suspense>
       </Canvas>
       <Leva />
