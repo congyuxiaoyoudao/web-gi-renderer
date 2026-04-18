@@ -2,32 +2,65 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { PlyLoader } from './loadPly';
 import { Splats } from './splats';
-import { mat4, vec3 } from 'wgpu-matrix';
+import { vec3 } from 'wgpu-matrix';
+import * as THREE from 'three/webgpu';
 
-export function WebGPUSplat({ url, splatRadius = 1, sortMethod = 'GPU' }: { url: string, splatRadius?: number, sortMethod?: string }) {
-  const { gl, camera, size } = useThree();
+export function WebGPUSplat({
+  url,
+  splatRadius = 1,
+  sortMethod = 'GPU',
+  debugDepth = false
+}: {
+  url: string,
+  splatRadius?: number,
+  sortMethod?: string,
+  debugDepth?: boolean
+}) {
+  const { gl, camera, size, scene } = useThree();
   const [splats, setSplats] = useState<Splats | null>(null);
   const [viewParamBindGroup, setViewParamBindGroup] = useState<GPUBindGroup | null>(null);
   const buffersRef = useRef<any>({});
-  
+
+  // Three.js render target for depth prepass
+  const depthRenderTargetRef = useRef<THREE.RenderTarget | null>(null);
+
   useEffect(() => {
     let isMounted = true;
 
     async function init() {
-      // Access WebGPU device and context from Three.js WebGPURenderer
       const backend = (gl as any).backend;
       if (!backend) return;
       const device = backend.device as GPUDevice;
       if (!device) return;
 
       const format = navigator.gpu.getPreferredCanvasFormat();
+      const dpr = window.devicePixelRatio;
+      const width = Math.floor(size.width * dpr);
+      const height = Math.floor(size.height * dpr);
+
+      // Create Three.js RenderTarget for depth prepass
+      // Use FloatType for depth32float format compatibility
+      const depthTexture = new THREE.DepthTexture(width, height, THREE.FloatType);
+      const depthRenderTarget = new THREE.RenderTarget(width, height, {
+        depthTexture: depthTexture
+      });
+      depthRenderTargetRef.current = depthRenderTarget;
+
+      // Get the actual depth format from the render target's GPU texture
+      // Three.js uses depth24plus for UnsignedIntType and depth32float for FloatType
+      let depthFormat: GPUTextureFormat = 'depth32float';
+      const rtTextureData = backend.get(depthRenderTarget.depthTexture);
+      if (rtTextureData?.texture) {
+        depthFormat = rtTextureData.format as GPUTextureFormat || 'depth32float';
+      }
 
       const viewParamBindGroupLayout = device.createBindGroupLayout({
         entries: [
           { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
           { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
           { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
-          { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} }
+          { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
+          { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: {type: 'uniform'} }
         ],
       });
 
@@ -51,17 +84,23 @@ export function WebGPUSplat({ url, splatRadius = 1, sortMethod = 'GPU' }: { url:
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
+      const debugDepthBuffer = device.createBuffer({
+        size: Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+
       const bindGroup = device.createBindGroup({
         layout: viewParamBindGroupLayout,
         entries: [
           { binding: 0, resource: {buffer: projectionBuffer} },
           { binding: 1, resource: {buffer: modelViewBuffer} },
           { binding: 2, resource: {buffer: screenSizeBuffer} },
-          { binding: 3, resource: {buffer: splatRadiusBuffer} }
+          { binding: 3, resource: {buffer: splatRadiusBuffer} },
+          { binding: 4, resource: {buffer: debugDepthBuffer} }
         ],
       });
 
-      buffersRef.current = { projectionBuffer, screenSizeBuffer, modelViewBuffer, splatRadiusBuffer };
+      buffersRef.current = { projectionBuffer, screenSizeBuffer, modelViewBuffer, splatRadiusBuffer, debugDepthBuffer };
       setViewParamBindGroup(bindGroup);
 
       try {
@@ -69,7 +108,7 @@ export function WebGPUSplat({ url, splatRadius = 1, sortMethod = 'GPU' }: { url:
         const gaussianBuffers = await parser.loadFromUrl(url);
 
         if (isMounted) {
-          const newSplats = new Splats(device, gaussianBuffers, viewParamBindGroupLayout, format);
+          const newSplats = new Splats(device, gaussianBuffers, viewParamBindGroupLayout, format, depthFormat);
           setSplats(newSplats);
         }
       } catch (e) {
@@ -81,26 +120,32 @@ export function WebGPUSplat({ url, splatRadius = 1, sortMethod = 'GPU' }: { url:
 
     return () => {
       isMounted = false;
+      if (depthRenderTargetRef.current) {
+        depthRenderTargetRef.current.dispose();
+      }
     };
-  }, [gl, url]);
+  }, [gl, size.width, size.height, url]);
 
   const lastCamPos = useRef(vec3.zero());
   const lastCamRot = useRef(vec3.zero());
   const visibleCountRef = useRef<number>(0);
 
-  // Render after Three.js
-  useFrame(({ gl, scene, camera }) => {
+  // Render splats with depth testing against Three.js scene
+  useFrame((state) => {
+    const { camera } = state;
     try {
-      // 1. Render Three.js scene first
-      gl.render(scene, camera);
-
       if (!splats || !viewParamBindGroup) return;
 
       const backend = (gl as any).backend;
       if (!backend) return;
+
       const device = backend.device as GPUDevice;
       const context = backend.getContext ? backend.getContext() as GPUCanvasContext : null;
       if (!device || !context) return;
+
+      const dpr = window.devicePixelRatio;
+      const width = Math.floor(size.width * dpr);
+      const height = Math.floor(size.height * dpr);
 
       let shouldUpdate = false;
       const camPos = vec3.create(camera.position.x, camera.position.y, camera.position.z);
@@ -112,15 +157,15 @@ export function WebGPUSplat({ url, splatRadius = 1, sortMethod = 'GPU' }: { url:
           shouldUpdate = true;
       }
 
-      // Update buffers using queue.writeBuffer (more efficient than staging buffers)
+      // Update uniform buffers
       const projection = new Float32Array(camera.projectionMatrix.elements);
       const modelView = new Float32Array(camera.matrixWorldInverse.elements);
 
-      // Directly write to uniform buffers using queue.writeBuffer
       device.queue.writeBuffer(buffersRef.current.projectionBuffer, 0, projection);
       device.queue.writeBuffer(buffersRef.current.modelViewBuffer, 0, modelView);
-      device.queue.writeBuffer(buffersRef.current.screenSizeBuffer, 0, new Float32Array([size.width, size.height]));
+      device.queue.writeBuffer(buffersRef.current.screenSizeBuffer, 0, new Float32Array([width, height]));
       device.queue.writeBuffer(buffersRef.current.splatRadiusBuffer, 0, new Float32Array([splatRadius]));
+      device.queue.writeBuffer(buffersRef.current.debugDepthBuffer, 0, new Float32Array([debugDepth ? 1.0 : 0.0]));
 
       const commandEncoder = device.createCommandEncoder();
 
@@ -138,12 +183,59 @@ export function WebGPUSplat({ url, splatRadius = 1, sortMethod = 'GPU' }: { url:
         }
       }
 
+      // Step 1: Render scene depth to RenderTarget
+      if (depthRenderTargetRef.current) {
+        const originalOverride = scene.overrideMaterial;
+        // Use a simple material that writes depth only
+        scene.overrideMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          depthWrite: true,
+          depthTest: true,
+          colorWrite: false  // Don't write color, only depth
+        });
+
+        try {
+          (gl as any).setRenderTarget(depthRenderTargetRef.current);
+          (gl as any).render(scene, camera);
+          (gl as any).setRenderTarget(null);
+        } catch (err) {
+          console.error('Failed to render depth prepass:', err);
+        }
+
+        scene.overrideMaterial = originalOverride;
+      }
+
+      // Step 2: Render scene color to canvas
+      (gl as any).render(scene, camera);
+
+      // Step 3: Get depth texture from our render target for depth testing
+      let depthTextureView: GPUTextureView | null = null;
+      if (depthRenderTargetRef.current?.depthTexture) {
+        const textureData = backend.get(depthRenderTargetRef.current.depthTexture);
+        if (textureData?.texture) {
+          depthTextureView = (textureData.texture as GPUTexture).createView();
+        }
+      }
+
+      if (!depthTextureView) {
+        console.warn('Depth texture not available');
+        return;
+      }
+
+      // Step 4: Render splats with depth testing
+      // We need to render to the canvas color and use our depth texture
       const renderPassDesc: GPURenderPassDescriptor = {
         colorAttachments: [{
             view: context.getCurrentTexture().createView(),
-            loadOp: "load", // Preserve Three.js render
+            loadOp: "load",
             storeOp: "store"
-        }]
+        }],
+        // Attach our pre-rendered depth texture for depth testing
+        // Note: when depthReadOnly is true, depthLoadOp and depthStoreOp must not be set
+        depthStencilAttachment: {
+            view: depthTextureView,
+            depthReadOnly: true  // Don't write depth, only read
+        }
       };
 
       const renderPass = commandEncoder.beginRenderPass(renderPassDesc);
@@ -154,7 +246,7 @@ export function WebGPUSplat({ url, splatRadius = 1, sortMethod = 'GPU' }: { url:
     } catch (err) {
       console.error("Error in WebGPUSplat useFrame:", err);
     }
-  }, 1); // priority 1 to render after Three.js
+  }, 1);
 
   return null;
 }

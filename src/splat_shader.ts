@@ -4,12 +4,14 @@ struct ViewParams {
     modelView: mat4x4<f32>,
     screenSize: vec2<f32>,
     splatRadius: f32,
+    debugDepth: f32,
 };
 
 @group(0) @binding(0) var<uniform> projection: mat4x4<f32>;
 @group(0) @binding(1) var<uniform> modelView: mat4x4<f32>;
 @group(0) @binding(2) var<uniform> screenSize: vec2<f32>;
 @group(0) @binding(3) var<uniform> splatRadius: f32;
+@group(0) @binding(4) var<uniform> debugDepth: f32;
 
 @group(1) @binding(0) var<storage, read> positions: array<vec4<f32>>;
 @group(1) @binding(1) var<storage, read> cov3d_buffer: array<vec4<f32>>;
@@ -27,15 +29,15 @@ fn vs_main(
     @location(1) splatId: u32,
 ) -> VertexOutput {
     var out: VertexOutput;
-    
+
     let pos3d = positions[splatId].xyz;
     let viewPos = modelView * vec4<f32>(pos3d, 1.0);
     let clipPos = projection * viewPos;
-    
+
     // Read 3D covariance
     let cov_part1 = cov3d_buffer[splatId * 2];
     let cov_part2 = cov3d_buffer[splatId * 2 + 1];
-    
+
     let cov3d = mat3x3<f32>(
         vec3<f32>(cov_part1.x, cov_part1.y, cov_part1.z),
         vec3<f32>(cov_part1.y, cov_part1.w, cov_part2.x),
@@ -84,18 +86,17 @@ fn vs_main(
     let maxSplatRadius = 1024.0;
     let basis1 = eigenVector_1 * min(sqrt(lambda_1) * 4.0 * splatRadius, maxSplatRadius);
     let basis2 = eigenVector_2 * min(sqrt(lambda_2) * 4.0 * splatRadius, maxSplatRadius);
-    
+
     // splatPos is in [-1, 1]
     let offset_pixels = splatPos.x * basis1 + splatPos.y * basis2;
-    
+
     // Convert pixels to clip space
-    // clip space is [-1, 1] x [-1, 1]
     let offset_clip = (offset_pixels / screenSize) * 2.0 * clipPos.w;
-    
+
     out.clip_position = vec4<f32>(clipPos.xy + offset_clip, clipPos.z, clipPos.w);
     out.color = colors[splatId];
     out.uv = splatPos;
-    
+
     return out;
 }
 
@@ -105,6 +106,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (d > 4.0) {
         discard;
     }
+
+        // Debug visualization - show splat depth as grayscale
+    if (debugDepth > 0.5) {
+        let depth = in.clip_position.z / in.clip_position.w;  // WebGPU NDC depth is already in [0, 1]
+        return vec4<f32>(depth, depth, depth, 1.0);
+    }
+
     let alpha = exp(-d) * in.color.a;
     return vec4<f32>(in.color.rgb * alpha, alpha);
 }

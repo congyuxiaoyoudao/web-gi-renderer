@@ -25,7 +25,7 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string }) {
+function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean }) {
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
 
   useFrame(() => {
@@ -73,7 +73,7 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} />
+      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} debugDepth={debugDepth} />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
@@ -139,7 +139,7 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex } = useSettings();
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
   const gaussianScene = GAUSSIAN_SCENES[sceneIndex];
@@ -203,7 +203,7 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene sphereColor={sphereColor} splatRadius={splatRadius} sortMethod={sortMethod} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} />
+          <Scene sphereColor={sphereColor} splatRadius={splatRadius} sortMethod={sortMethod} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} debugDepth={debugDepth} />
         </Suspense>
       </Canvas>
       <Leva />
