@@ -17,15 +17,10 @@ struct ViewParams {
 @group(1) @binding(1) var<storage, read> cov3d_buffer: array<vec4<f32>>;
 @group(1) @binding(2) var<storage, read> colors: array<vec4<f32>>;
 
-// Depth texture and sampler for depth testing against Three.js scene
-@group(2) @binding(0) var depthTexture: texture_depth_2d;
-@group(2) @binding(1) var depthSampler: sampler_comparison;
-
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) uv: vec2<f32>,
-    @location(2) ndc_depth: f32,
 };
 
 @vertex
@@ -38,10 +33,6 @@ fn vs_main(
     let pos3d = positions[splatId].xyz;
     let viewPos = modelView * vec4<f32>(pos3d, 1.0);
     let clipPos = projection * viewPos;
-
-    // Store NDC depth for depth texture comparison
-    // WebGPU NDC depth is in [0, 1] range after perspective divide
-    out.ndc_depth = clipPos.z / clipPos.w;
 
     // Read 3D covariance
     let cov_part1 = cov3d_buffer[splatId * 2];
@@ -100,7 +91,6 @@ fn vs_main(
     let offset_pixels = splatPos.x * basis1 + splatPos.y * basis2;
 
     // Convert pixels to clip space
-    // clip space is [-1, 1] x [-1, 1]
     let offset_clip = (offset_pixels / screenSize) * 2.0 * clipPos.w;
 
     out.clip_position = vec4<f32>(clipPos.xy + offset_clip, clipPos.z, clipPos.w);
@@ -117,31 +107,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Depth test: compare splat depth against stored depth from Three.js scene
-    // Convert clip position to UV coordinates [0, 1]
-    let uv = in.clip_position.xy * 0.5 + 0.5;
-
-    // Sample depth texture and compare
-    // textureSampleCompareLevel returns 1.0 if depth test passes, 0.0 otherwise
-    // We use less-equal comparison: splat passes if its depth <= stored depth
-    let depthCompare = textureSampleCompareLevel(depthTexture, depthSampler, uv, in.ndc_depth);
-
-    // If depth test fails (stored depth is closer), discard this fragment
-    if (depthCompare == 0.0) {
-        // In debug mode, show occluded splats in bright red
-        if (debugDepth > 0.5) {
-            let debugColor = vec4<f32>(1.0, 0.0, 0.0, 0.8);  // Bright red with alpha
-            return debugColor;
-        }
-        discard;
-    }
-
-    // In debug mode, visualize depth as color gradient
+    // Debug visualization - show splat depth as grayscale
     if (debugDepth > 0.5) {
-        // Map depth to color: near = green, far = blue
-        let depthColor = vec3<f32>(0.0, 1.0 - in.ndc_depth, in.ndc_depth);
-        let alpha = exp(-d) * in.color.a;
-        return vec4<f32>(depthColor * alpha, alpha);
+        let ndc_z = in.clip_position.z / in.clip_position.w;
+        let depth = (ndc_z + 1.0) * 0.5;  // NDC [-1, 1] to [0, 1]
+        return vec4<f32>(depth, depth, depth, 1.0);
     }
 
     let alpha = exp(-d) * in.color.a;
