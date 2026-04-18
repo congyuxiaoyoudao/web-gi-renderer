@@ -25,7 +25,31 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, splatRadius, onCameraReady, gaussianUrl }: { sphereColor: string; splatRadius: number; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string }) {
+function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string }) {
+  const perfRef = useRef({ frames: 0, prevTime: performance.now() });
+
+  useFrame(() => {
+    perfRef.current.frames++;
+    const time = performance.now();
+    if (time >= perfRef.current.prevTime + 1000) {
+      const fps = Math.round((perfRef.current.frames * 1000) / (time - perfRef.current.prevTime));
+      perfRef.current.frames = 0;
+      perfRef.current.prevTime = time;
+      
+      const memory = (performance as any).memory;
+      const memoryUsage = memory ? `${Math.round(memory.usedJSHeapSize / 1048576)} MB / ${Math.round(memory.totalJSHeapSize / 1048576)} MB` : 'N/A';
+      
+      const fpsEl = document.getElementById('perf-fps');
+      if (fpsEl) fpsEl.innerText = `${fps} FPS`;
+      
+      const memEl = document.getElementById('perf-memory');
+      if (memEl) memEl.innerText = memoryUsage;
+
+      const sortEl = document.getElementById('perf-sort-method');
+      if (sortEl) sortEl.innerText = sortMethod;
+    }
+  });
+
   const camera = useFrame((state) => {
     if (onCameraReady && state.camera) {
       onCameraReady(state.camera as THREE.PerspectiveCamera);
@@ -49,7 +73,7 @@ function Scene({ sphereColor, splatRadius, onCameraReady, gaussianUrl }: { spher
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} />
+      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
@@ -115,7 +139,7 @@ function Scene({ sphereColor, splatRadius, onCameraReady, gaussianUrl }: { spher
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset, splatRadius, sceneIndex } = useSettings();
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
   const gaussianScene = GAUSSIAN_SCENES[sceneIndex];
@@ -140,6 +164,17 @@ export default function App() {
         <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">WebGPU PBR & GI</h1>
         <p className="text-zinc-400 text-sm mt-2 max-w-md">
           Real-time physically based rendering with global illumination (IBL) powered by React Three Fiber and Three.js WebGPU Renderer.
+        </p>
+      </div>
+      <div className="absolute bottom-6 left-6 z-10 text-white font-sans pointer-events-none">
+        <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500" id="perf-fps">
+          0 FPS
+        </h2>
+        <p className="text-zinc-400 text-sm mt-2 max-w-md">
+          Memory: <span id="perf-memory">N/A</span>
+        </p>
+        <p className="text-zinc-400 text-sm mt-2 max-w-md">
+          Sort Method: <span id="perf-sort-method">{sortMethod}</span>
         </p>
       </div>
       <Canvas
@@ -168,7 +203,7 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene sphereColor={sphereColor} splatRadius={splatRadius} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} />
+          <Scene sphereColor={sphereColor} splatRadius={splatRadius} sortMethod={sortMethod} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} />
         </Suspense>
       </Canvas>
       <Leva />

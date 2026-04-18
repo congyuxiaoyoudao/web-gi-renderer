@@ -23,7 +23,7 @@ export const GAUSSIAN_SCENES = [
 ];
 
 export function useSettings() {
-  const { sphereColor, cameraPreset, splatRadius, sceneIndex } = useControls({
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex } = useControls({
     sphereColor: {
       value: '#ff0055',
       label: 'Sphere Color',
@@ -35,6 +35,11 @@ export function useSettings() {
         return acc;
       }, {} as Record<string, number>),
       label: 'Camera Position',
+    },
+    sortMethod: {
+      value: 'GPU',
+      options: ['CPU', 'GPU'],
+      label: 'Sort Method',
     },
     splatRadius: {
       value: 0.7,
@@ -53,5 +58,5 @@ export function useSettings() {
     },
   });
 
-  return { sphereColor, cameraPreset, splatRadius, sceneIndex };
+  return { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex };
 }
