@@ -107,10 +107,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Debug visualization - show splat depth as grayscale
+        // Debug visualization - show splat depth as grayscale
     if (debugDepth > 0.5) {
-        let ndc_z = in.clip_position.z / in.clip_position.w;
-        let depth = (ndc_z + 1.0) * 0.5;  // NDC [-1, 1] to [0, 1]
+        let depth = in.clip_position.z / in.clip_position.w;  // WebGPU NDC depth is already in [0, 1]
         return vec4<f32>(depth, depth, depth, 1.0);
     }
 
