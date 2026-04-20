@@ -9,12 +9,14 @@ export function WebGPUSplat({
   url,
   splatRadius = 1,
   sortMethod = 'GPU',
-  debugDepth = false
+  debugDepth = false,
+  gaussianTransform = { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } }
 }: {
   url: string,
   splatRadius?: number,
   sortMethod?: string,
-  debugDepth?: boolean
+  debugDepth?: boolean,
+  gaussianTransform?: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }
 }) {
   const { gl, camera, size, scene } = useThree();
   const [splats, setSplats] = useState<Splats | null>(null);
@@ -159,7 +161,20 @@ export function WebGPUSplat({
 
       // Update uniform buffers
       const projection = new Float32Array(camera.projectionMatrix.elements);
-      const modelView = new Float32Array(camera.matrixWorldInverse.elements);
+      // Build model matrix: user transform + COLMAP→Three.js coordinate conversion
+      const splatModelMatrix = new THREE.Matrix4()
+        .makeTranslation(gaussianTransform.position.x, gaussianTransform.position.y, gaussianTransform.position.z)
+        .multiply(new THREE.Matrix4().makeRotationFromEuler(
+          new THREE.Euler(
+            gaussianTransform.rotation.x * Math.PI / 180,
+            gaussianTransform.rotation.y * Math.PI / 180,
+            gaussianTransform.rotation.z * Math.PI / 180
+          )
+        ))
+        .multiply(new THREE.Matrix4().makeScale(1, -1, -1));
+      const viewMatrix = camera.matrixWorldInverse.clone();
+      viewMatrix.multiply(splatModelMatrix);
+      const modelView = new Float32Array(viewMatrix.elements);
 
       device.queue.writeBuffer(buffersRef.current.projectionBuffer, 0, projection);
       device.queue.writeBuffer(buffersRef.current.modelViewBuffer, 0, modelView);

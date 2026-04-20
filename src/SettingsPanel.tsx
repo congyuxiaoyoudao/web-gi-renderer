@@ -62,5 +62,20 @@ export function useSettings() {
     },
   });
 
-  return { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth };
+  const gaussianTransform = useControls('Gaussian Transform', {
+    position: {
+      value: { x: 0, y: 0, z: 0 },
+      step: 0.1,
+      label: 'Position',
+    },
+    rotation: {
+      value: { x: 0, y: 0, z: 0 },
+      min: -180,
+      max: 180,
+      step: 1,
+      label: 'Rotation (°)',
+    },
+  });
+
+  return { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform };
 }

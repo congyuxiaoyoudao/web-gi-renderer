@@ -1,4 +1,4 @@
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, ContactShadows, OrbitControls, Float, Backdrop, Lightformer } from '@react-three/drei';
 import { Leva } from 'leva';
 import { WebGPURenderer } from 'three/webgpu';
@@ -25,8 +25,20 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean }) {
+function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, gaussianTransform }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } } }) {
+  const { scene } = useThree();
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
+
+  // Sync environment/background rotation with gaussian transform
+  useEffect(() => {
+    const euler = new THREE.Euler(
+      gaussianTransform.rotation.x * Math.PI / 180,
+      gaussianTransform.rotation.y * Math.PI / 180,
+      gaussianTransform.rotation.z * Math.PI / 180
+    );
+    scene.environmentRotation.copy(euler);
+    scene.backgroundRotation.copy(euler);
+  }, [gaussianTransform.rotation.x, gaussianTransform.rotation.y, gaussianTransform.rotation.z, scene]);
 
   useFrame(() => {
     perfRef.current.frames++;
@@ -73,7 +85,7 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} debugDepth={debugDepth} />
+      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} debugDepth={debugDepth} gaussianTransform={gaussianTransform} />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
@@ -139,7 +151,7 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth } = useSettings();
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
   const gaussianScene = GAUSSIAN_SCENES[sceneIndex];
@@ -203,7 +215,7 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene sphereColor={sphereColor} splatRadius={splatRadius} sortMethod={sortMethod} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} debugDepth={debugDepth} />
+          <Scene sphereColor={sphereColor} splatRadius={splatRadius} sortMethod={sortMethod} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} debugDepth={debugDepth} gaussianTransform={gaussianTransform} />
         </Suspense>
       </Canvas>
       <Leva />
