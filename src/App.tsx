@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, ContactShadows, OrbitControls, Float, Backdrop, Lightformer } from '@react-three/drei';
 import { Leva } from 'leva';
 import { WebGPURenderer } from 'three/webgpu';
-import { Suspense, useRef, useState, useEffect } from 'react';
+import { Suspense, useRef, useState, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import { CAMERA_PRESETS, useSettings, GAUSSIAN_SCENES } from '@/src/SettingsPanel';
 import { WebGPUSplat } from './WebGPUSplat';
@@ -145,15 +145,17 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
         <meshStandardMaterial color="#151515" roughness={0.8} metalness={0.2} />
       </mesh>
 
-      <OrbitControls makeDefault autoRotate autoRotateSpeed={0.5} enableZoom={true} minPolarAngle={0} maxPolarAngle={Math.PI / 2 + 0.1} />
+      <OrbitControls makeDefault enableZoom={true} minPolarAngle={0} maxPolarAngle={Math.PI / 2 + 0.1} />
     </>
   );
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform } = useSettings();
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform,
+    cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
+  const [playing, setPlaying] = useState(false);
   const gaussianScene = GAUSSIAN_SCENES[sceneIndex];
 
   useEffect(() => {
@@ -163,11 +165,70 @@ export default function App() {
 
   useEffect(() => {
     if (!camera) return;
+    // Camera frames override presets
+    if (cameraFrames.length > 0) {
+      const frame = cameraFrames[cameraFrameIndex];
+      if (frame) {
+        camera.position.copy(frame.position);
+        camera.quaternion.copy(frame.quaternion);
+        camera.fov = frame.fov;
+        camera.updateProjectionMatrix();
+      }
+      return;
+    }
     const preset = CAMERA_PRESETS[cameraPreset];
     camera.position.set(preset.position[0], preset.position[1], preset.position[2]);
     camera.lookAt(0, 1, 0);
     camera.updateProjectionMatrix();
-  }, [cameraPreset, camera]);
+  }, [cameraPreset, camera, cameraFrames, cameraFrameIndex]);
+
+  // Camera path playback with smooth interpolation
+  const playProgressRef = useRef(0);
+
+  useEffect(() => {
+    if (!playing || !camera || cameraFrames.length < 2) return;
+
+    playProgressRef.current = cameraFrameIndex;
+    let lastTime = performance.now();
+    let animId: number;
+
+    const speed = 3; // frames per second
+
+    const animate = () => {
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      playProgressRef.current += dt * speed;
+
+      if (playProgressRef.current >= cameraFrames.length - 1) {
+        playProgressRef.current = cameraFrames.length - 1;
+        setCameraFrameIndex(cameraFrames.length - 1);
+        setPlaying(false);
+        return;
+      }
+
+      const t = playProgressRef.current;
+      const i = Math.floor(t);
+      const frac = t - i;
+      const j = Math.min(i + 1, cameraFrames.length - 1);
+
+      const frameA = cameraFrames[i];
+      const frameB = cameraFrames[j];
+
+      // Spherical linear interpolation for rotation, linear for position/fov
+      camera.position.lerpVectors(frameA.position, frameB.position, frac);
+      camera.quaternion.slerpQuaternions(frameA.quaternion, frameB.quaternion, frac);
+      camera.fov = frameA.fov + (frameB.fov - frameA.fov) * frac;
+      camera.updateProjectionMatrix();
+
+      setCameraFrameIndex(i);
+      animId = requestAnimationFrame(animate);
+    };
+
+    animId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animId);
+  }, [playing, camera, cameraFrames, setCameraFrameIndex]);
 
   return (
     <div className="w-full h-screen bg-zinc-950">
@@ -219,6 +280,66 @@ export default function App() {
         </Suspense>
       </Canvas>
       <Leva />
+      {/* Camera Path Toolbar */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
+        <div className="flex items-center gap-0 bg-zinc-900/95 backdrop-blur-sm rounded-lg text-white font-sans overflow-hidden border border-zinc-700/50">
+          <button
+            onClick={clearCameraPath}
+            title="Clear camera path"
+            className="px-3 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer border-r border-zinc-700/50"
+          >
+            =
+          </button>
+          <label
+            title="Load cameras.json"
+            className="px-3 py-2 text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer border-r border-zinc-700/50"
+          >
+            +
+            <input
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) loadCameraJson(file);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          <div className="flex items-center gap-2 px-3 py-2 border-r border-zinc-700/50">
+            <span className="text-xs text-zinc-500">▷</span>
+            {cameraFrames.length > 0 ? (
+              <input
+                type="range"
+                min={0}
+                max={cameraFrames.length - 1}
+                value={cameraFrameIndex}
+                onChange={(e) => setCameraFrameIndex(Number(e.target.value))}
+                className="w-24"
+              />
+            ) : (
+              <span className="text-xs text-zinc-500 w-24 text-center">—</span>
+            )}
+          </div>
+          <div className="px-3 py-2 border-r border-zinc-700/50 min-w-[60px] text-center">
+            <span className="text-xs text-zinc-300 font-mono">
+              🎞 {cameraFrames.length > 0 ? `${cameraFrameIndex + 1}.0` : '0.0'}
+            </span>
+          </div>
+          <button
+            onClick={() => cameraFrames.length > 0 && setPlaying(!playing)}
+            className={`px-4 py-2 text-xs font-semibold tracking-wider transition-colors cursor-pointer ${
+              cameraFrames.length > 0
+                ? playing
+                  ? 'text-yellow-400 hover:bg-zinc-800'
+                  : 'text-white hover:bg-zinc-800'
+                : 'text-zinc-600 cursor-default'
+            }`}
+          >
+            {playing ? 'PAUSE' : 'PLAY'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

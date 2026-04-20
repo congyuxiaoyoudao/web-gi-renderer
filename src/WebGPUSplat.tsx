@@ -159,18 +159,19 @@ export function WebGPUSplat({
           shouldUpdate = true;
       }
 
+      // Ensure camera matrices are up-to-date before reading
+      camera.updateMatrixWorld(true);
+
       // Update uniform buffers
       const projection = new Float32Array(camera.projectionMatrix.elements);
-      // Build model matrix: user transform + COLMAP→Three.js coordinate conversion
+      // Build model matrix: Translation * Rotation * COLMAP→Three.js flip
       const splatModelMatrix = new THREE.Matrix4()
         .makeTranslation(gaussianTransform.position.x, gaussianTransform.position.y, gaussianTransform.position.z)
-        .multiply(new THREE.Matrix4().makeRotationFromEuler(
-          new THREE.Euler(
-            gaussianTransform.rotation.x * Math.PI / 180,
-            gaussianTransform.rotation.y * Math.PI / 180,
-            gaussianTransform.rotation.z * Math.PI / 180
-          )
-        ))
+        .multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(
+          gaussianTransform.rotation.x * Math.PI / 180,
+          gaussianTransform.rotation.y * Math.PI / 180,
+          gaussianTransform.rotation.z * Math.PI / 180
+        )))
         .multiply(new THREE.Matrix4().makeScale(1, -1, -1));
       const viewMatrix = camera.matrixWorldInverse.clone();
       viewMatrix.multiply(splatModelMatrix);

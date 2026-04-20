@@ -1,4 +1,6 @@
 import { useControls } from 'leva';
+import { useState, useCallback } from 'react';
+import { parseAndConvert, type ThreeCamera } from './colmapCamera';
 
 export const CAMERA_PRESETS = [
   { name: 'Front View', position: [0, 2, 8] },
@@ -77,5 +79,32 @@ export function useSettings() {
     },
   });
 
-  return { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform };
+  // Camera path state (managed outside Leva)
+  const [cameraFrames, setCameraFrames] = useState<ThreeCamera[]>([]);
+  const [cameraFrameIndex, setCameraFrameIndex] = useState(0);
+
+  const loadCameraJson = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const frames = parseAndConvert(text);
+        setCameraFrames(frames);
+        setCameraFrameIndex(0);
+      } catch (err) {
+        console.error('Failed to parse cameras.json:', err);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const clearCameraPath = useCallback(() => {
+    setCameraFrames([]);
+    setCameraFrameIndex(0);
+  }, []);
+
+  return {
+    sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform,
+    cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath
+  };
 }
