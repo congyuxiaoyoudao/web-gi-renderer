@@ -1,5 +1,5 @@
-import { useControls } from 'leva';
-import { useState, useCallback } from 'react';
+import { useControls, button, folder } from 'leva';
+import { useState, useCallback, useEffect } from 'react';
 import { parseAndConvert, type ThreeCamera } from './colmapCamera';
 
 export const CAMERA_PRESETS = [
@@ -9,6 +9,8 @@ export const CAMERA_PRESETS = [
 ];
 
 export const GAUSSIAN_SCENES = [
+  { name: 'None', url: '' },
+  { name: 'Custom', url: '__custom__' },
   { name: 'Food', url: 'assets/food.ply' },
   {
     name: 'Bicycle (HuggingFace)',
@@ -23,6 +25,7 @@ export const GAUSSIAN_SCENES = [
     url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/stump/point_cloud/iteration_7000/point_cloud.ply'
   },
 ];
+
 
 export function useSettings() {
   const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth } = useControls({
@@ -51,7 +54,7 @@ export function useSettings() {
       label: 'Splat Radius',
     },
     sceneIndex: {
-      value: 0,
+      value: 2,
       options: GAUSSIAN_SCENES.reduce((acc, scene, index) => {
         acc[scene.name] = index;
         return acc;
@@ -63,6 +66,54 @@ export function useSettings() {
       label: 'Debug Depth',
     },
   });
+
+  const [uploadedGaussianUrl, setUploadedGaussianUrl] = useState('');
+  const [uploadedGaussianName, setUploadedGaussianName] = useState('');
+
+  const loadGaussianPly = useCallback((file: File) => {
+    const objectUrl = URL.createObjectURL(file);
+    setUploadedGaussianUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      return objectUrl;
+    });
+    setUploadedGaussianName(file.name);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (uploadedGaussianUrl) {
+        URL.revokeObjectURL(uploadedGaussianUrl);
+      }
+    };
+  }, [uploadedGaussianUrl]);
+
+  const [, setUploadControls] = useControls(() => ({
+    gaussianUpload: folder({
+      uploadGaussianPly: button(() => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.ply';
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (file) loadGaussianPly(file);
+        };
+        input.click();
+      }),
+      customGaussianFile: {
+        value: 'No file loaded',
+        editable: false,
+        label: 'Custom PLY',
+      },
+    }, {
+      order: 999,
+    }),
+  }), [loadGaussianPly]);
+
+  useEffect(() => {
+    setUploadControls({ customGaussianFile: uploadedGaussianName || 'No file loaded' });
+  }, [uploadedGaussianName, setUploadControls]);
 
   const gaussianTransform = useControls('Gaussian Transform', {
     position: {
@@ -105,6 +156,7 @@ export function useSettings() {
 
   return {
     sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform,
+    uploadedGaussianUrl,
     cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath
   };
 }

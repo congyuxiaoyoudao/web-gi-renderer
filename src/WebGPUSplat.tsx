@@ -107,6 +107,14 @@ export function WebGPUSplat({
 
       try {
         const parser = new PlyLoader();
+
+        if (!url) {
+          if (isMounted) {
+            setSplats(null);
+          }
+          return;
+        }
+
         const gaussianBuffers = await parser.loadFromUrl(url);
 
         if (isMounted) {
@@ -136,14 +144,18 @@ export function WebGPUSplat({
   useFrame((state) => {
     const { camera } = state;
     try {
-      if (!splats || !viewParamBindGroup) return;
-
       const backend = (gl as any).backend;
       if (!backend) return;
 
       const device = backend.device as GPUDevice;
       const context = backend.getContext ? backend.getContext() as GPUCanvasContext : null;
       if (!device || !context) return;
+
+      if (!splats || !viewParamBindGroup) {
+        // Keep rendering the regular Three.js scene when no splat source is active.
+        (gl as any).render(scene, camera);
+        return;
+      }
 
       const dpr = window.devicePixelRatio;
       const width = Math.floor(size.width * dpr);

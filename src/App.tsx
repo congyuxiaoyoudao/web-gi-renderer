@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, ContactShadows, OrbitControls, Float, Backdrop, Lightformer } from '@react-three/drei';
 import { Leva } from 'leva';
 import { WebGPURenderer } from 'three/webgpu';
-import { Suspense, useRef, useState, useEffect, useCallback } from 'react';
+import { Suspense, useRef, useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { CAMERA_PRESETS, useSettings, GAUSSIAN_SCENES } from '@/src/SettingsPanel';
 import { WebGPUSplat } from './WebGPUSplat';
@@ -152,11 +152,14 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
 
 export default function App() {
   const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform,
-    cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = useSettings();
+    uploadedGaussianUrl, cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
   const gaussianScene = GAUSSIAN_SCENES[sceneIndex];
+  const isNoneGaussianMode = gaussianScene.url === '';
+  const isCustomGaussianMode = gaussianScene.url === '__custom__';
+  const gaussianUrl = isCustomGaussianMode ? uploadedGaussianUrl : (isNoneGaussianMode ? '' : gaussianScene.url);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 1000);
@@ -276,7 +279,15 @@ export default function App() {
         }}
       >
         <Suspense fallback={null}>
-          <Scene sphereColor={sphereColor} splatRadius={splatRadius} sortMethod={sortMethod} onCameraReady={setCamera} gaussianUrl={gaussianScene.url} debugDepth={debugDepth} gaussianTransform={gaussianTransform} />
+          <Scene
+            sphereColor={sphereColor}
+            splatRadius={splatRadius}
+            sortMethod={sortMethod}
+            onCameraReady={setCamera}
+            gaussianUrl={gaussianUrl}
+            debugDepth={debugDepth}
+            gaussianTransform={gaussianTransform}
+          />
         </Suspense>
       </Canvas>
       <Leva />

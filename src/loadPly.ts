@@ -311,18 +311,26 @@ export class PlyLoader {
     }
 
     private getTypeSize(type: string): number {
-        switch (type) {
+        switch (type.toLowerCase()) {
+            case 'char':
             case 'int8':
+            case 'uchar':
             case 'uint8':
                 return 1;
+            case 'short':
             case 'int16':
+            case 'ushort':
             case 'uint16':
                 return 2;
+            case 'int':
             case 'int32':
+            case 'uint':
             case 'uint32':
             case 'float':
             case 'float32':
                 return 4;
+            case 'int64':
+            case 'uint64':
             case 'float64':
             case 'double':
                 return 8;
