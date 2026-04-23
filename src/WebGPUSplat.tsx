@@ -10,12 +10,14 @@ export function WebGPUSplat({
   splatRadius = 1,
   sortMethod = 'GPU',
   debugDepth = false,
+  shDegree = 3,
   gaussianTransform = { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 } }
 }: {
   url: string,
   splatRadius?: number,
   sortMethod?: string,
   debugDepth?: boolean,
+  shDegree?: number,
   gaussianTransform?: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }
 }) {
   const { gl, camera, size, scene } = useThree();
@@ -62,7 +64,9 @@ export function WebGPUSplat({
           { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
           { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
           { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
-          { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: {type: 'uniform'} }
+          { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: {type: 'uniform'} },
+          { binding: 5, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
+          { binding: 6, visibility: GPUShaderStage.VERTEX, buffer: {type: 'uniform'} },
         ],
       });
 
@@ -91,6 +95,16 @@ export function WebGPUSplat({
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
+      const shDegreeBuffer = device.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+
+      const camPosModelBuffer = device.createBuffer({
+        size: 4 * Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+
       const bindGroup = device.createBindGroup({
         layout: viewParamBindGroupLayout,
         entries: [
@@ -98,11 +112,13 @@ export function WebGPUSplat({
           { binding: 1, resource: {buffer: modelViewBuffer} },
           { binding: 2, resource: {buffer: screenSizeBuffer} },
           { binding: 3, resource: {buffer: splatRadiusBuffer} },
-          { binding: 4, resource: {buffer: debugDepthBuffer} }
+          { binding: 4, resource: {buffer: debugDepthBuffer} },
+          { binding: 5, resource: {buffer: shDegreeBuffer} },
+          { binding: 6, resource: {buffer: camPosModelBuffer} },
         ],
       });
 
-      buffersRef.current = { projectionBuffer, screenSizeBuffer, modelViewBuffer, splatRadiusBuffer, debugDepthBuffer };
+      buffersRef.current = { projectionBuffer, screenSizeBuffer, modelViewBuffer, splatRadiusBuffer, debugDepthBuffer, shDegreeBuffer, camPosModelBuffer };
       setViewParamBindGroup(bindGroup);
 
       try {
@@ -194,6 +210,15 @@ export function WebGPUSplat({
       device.queue.writeBuffer(buffersRef.current.screenSizeBuffer, 0, new Float32Array([width, height]));
       device.queue.writeBuffer(buffersRef.current.splatRadiusBuffer, 0, new Float32Array([splatRadius]));
       device.queue.writeBuffer(buffersRef.current.debugDepthBuffer, 0, new Float32Array([debugDepth ? 1.0 : 0.0]));
+
+      // Cap SH degree to what the loaded model actually supports
+      const effectiveSHDegree = Math.min(shDegree, splats.maxSHDegree);
+      device.queue.writeBuffer(buffersRef.current.shDegreeBuffer, 0, new Uint32Array([effectiveSHDegree]));
+
+      // Compute camera position in model space for view-dependent SH evaluation
+      const camPosWorld = camera.position.clone();
+      const camPosModel = camPosWorld.applyMatrix4(splatModelMatrix.clone().invert());
+      device.queue.writeBuffer(buffersRef.current.camPosModelBuffer, 0, new Float32Array([camPosModel.x, camPosModel.y, camPosModel.z, 0]));
 
       const commandEncoder = device.createCommandEncoder();
 

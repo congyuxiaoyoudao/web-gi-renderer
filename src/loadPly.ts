@@ -1,7 +1,10 @@
 export interface GaussianBuffers {
     positions: Float32Array;  // [x, y, z, padding] * count
     cov3d: Float32Array;      // [c_xx, c_xy, c_xz, c_yy, c_yz, c_zz, 0, 0] * count
-    colors: Float32Array;     // [r, g, b, opacity] * count
+    colors: Float32Array;     // [r, g, b, opacity] * count (degree-0 pre-baked + opacity)
+    // 16 vec4(R,G,B,0) per splat: index 0 = DC, 1-3 = deg1, 4-8 = deg2, 9-15 = deg3
+    shCoeffs: Float32Array;
+    maxSHDegree: number;
     count: number;
 }
 
@@ -107,6 +110,22 @@ export class PlyLoader {
         const f_dc_2_offset = getPropertyOffset('f_dc_2');
         const opacity_offset = getPropertyOffset('opacity');
 
+        // Detect higher-order SH coefficients (f_rest_0..N)
+        const fRestCount = this.properties.filter(p => p.name.startsWith('f_rest_')).length;
+        const fRestOffsets: number[] = [];
+        for (let i = 0; i < fRestCount; i++) {
+            fRestOffsets.push(getPropertyOffset(`f_rest_${i}`));
+        }
+        const perChannel = Math.floor(fRestCount / 3);
+        let maxSHDegree = 0;
+        if (perChannel >= 3) maxSHDegree = 1;
+        if (perChannel >= 8) maxSHDegree = 2;
+        if (perChannel >= 15) maxSHDegree = 3;
+
+        // 15 higher-order basis × 3 channels = 45 floats per splat (no DC, no padding)
+        // layout: [R_b, G_b, B_b] for b=0..14 (deg1: 0-2, deg2: 3-7, deg3: 8-14)
+        const shCoeffs = new Float32Array(this.numVertices * 45);
+
         for (let v = 0; v < this.numVertices; v++) {
             const baseOffset = this.headerLength + v * this.vertexStride;
 
@@ -187,17 +206,29 @@ export class PlyLoader {
             cov3d[v * 8 + 6] = 0.0;
             cov3d[v * 8 + 7] = 0.0;
 
-            // write colors [r, g, b, opacity]
+            // write colors [r, g, b, opacity] using degree-0 only (fallback / backward compat)
             colors[v * 4 + 0] = 0.5 + SH_C0 * f_dc_0;
             colors[v * 4 + 1] = 0.5 + SH_C0 * f_dc_1;
             colors[v * 4 + 2] = 0.5 + SH_C0 * f_dc_2;
             colors[v * 4 + 3] = opacity;
+
+            // Store 15 higher-order basis coefficients as tight [R, G, B] triples.
+            for (let b = 0; b < Math.min(perChannel, 15); b++) {
+                const r  = dataView.getFloat32(baseOffset + fRestOffsets[b], true);
+                const g  = dataView.getFloat32(baseOffset + fRestOffsets[b + perChannel], true);
+                const bl = dataView.getFloat32(baseOffset + fRestOffsets[b + 2 * perChannel], true);
+                shCoeffs[v * 45 + b * 3 + 0] = r;
+                shCoeffs[v * 45 + b * 3 + 1] = g;
+                shCoeffs[v * 45 + b * 3 + 2] = bl;
+            }
         }
 
         return {
             positions,
             cov3d,
             colors,
+            shCoeffs,
+            maxSHDegree,
             count: this.numVertices
         };
     }
@@ -213,6 +244,15 @@ export class PlyLoader {
         const positions = new Float32Array(this.numVertices * 4);
         const cov3d = new Float32Array(this.numVertices * 8);
         const colors = new Float32Array(this.numVertices * 4);
+
+        const fRestCount = this.properties.filter(p => p.name.startsWith('f_rest_')).length;
+        const perChannel = Math.floor(fRestCount / 3);
+        let maxSHDegree = 0;
+        if (perChannel >= 3) maxSHDegree = 1;
+        if (perChannel >= 8) maxSHDegree = 2;
+        if (perChannel >= 15) maxSHDegree = 3;
+        const fRestBaseIdx = this.properties.findIndex(p => p.name === 'f_rest_0');
+        const shCoeffs = new Float32Array(this.numVertices * 45);
 
         for (let v = 0; v < this.numVertices && v < lines.length; v++) {
             const tokens = lines[v].split(/\s+/).filter(t => t.length > 0);
@@ -300,12 +340,26 @@ export class PlyLoader {
             colors[v * 4 + 1] = 0.5 + SH_C0 * f_dc_1;
             colors[v * 4 + 2] = 0.5 + SH_C0 * f_dc_2;
             colors[v * 4 + 3] = opacity;
+
+            // rest sh coeffs
+            if (fRestBaseIdx >= 0) {
+                for (let b = 0; b < Math.min(perChannel, 15); b++) {
+                    const r  = values[fRestBaseIdx + b] ?? 0;
+                    const g  = values[fRestBaseIdx + b + perChannel] ?? 0;
+                    const bl = values[fRestBaseIdx + b + 2 * perChannel] ?? 0;
+                    shCoeffs[v * 45 + b * 3 + 0] = r;
+                    shCoeffs[v * 45 + b * 3 + 1] = g;
+                    shCoeffs[v * 45 + b * 3 + 2] = bl;
+                }
+            }
         }
 
         return {
             positions,
             cov3d,
             colors,
+            shCoeffs,
+            maxSHDegree,
             count: this.numVertices
         };
     }

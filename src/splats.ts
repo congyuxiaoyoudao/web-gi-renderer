@@ -11,6 +11,7 @@ export class Splats {
     private _splatIdsBuffer: GPUBuffer;
     private _cov3dBuffer: GPUBuffer;
     private _positionsBuffer: Float32Array;
+    public maxSHDegree: number = 0;
 
     // GPU Compute resources for sorting
     private _computeDistancesPipeline!: GPUComputePipeline;
@@ -53,6 +54,11 @@ export class Splats {
                     binding: 2,
                     visibility: GPUShaderStage.VERTEX,
                     buffer: { type: 'read-only-storage' }
+                },
+                {
+                    binding: 3,
+                    visibility: GPUShaderStage.VERTEX,
+                    buffer: { type: 'read-only-storage' }
                 }
             ],
         });
@@ -75,6 +81,13 @@ export class Splats {
         });
         device.queue.writeBuffer(colorsBuffer, 0, colors.buffer);
 
+        // Tight-packed f32 array: 15 higher-order basis × 3 channels = 45 floats per splat.
+        const shCoeffsBuffer = device.createBuffer({
+            size: 45 * Float32Array.BYTES_PER_ELEMENT * vertices.count,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+        device.queue.writeBuffer(shCoeffsBuffer, 0, vertices.shCoeffs.buffer);
+
         const splatBindGroup = device?.createBindGroup({
             layout: splatBindGroupLayout,
             entries: [
@@ -89,6 +102,10 @@ export class Splats {
                 {
                     binding: 2,
                     resource: {buffer: colorsBuffer},
+                },
+                {
+                    binding: 3,
+                    resource: {buffer: shCoeffsBuffer},
                 }
             ],
         });
@@ -196,6 +213,7 @@ export class Splats {
         this._splatIdsBuffer = splatIdsBuffer;
         this._positionsBuffer = positions;
         this._cov3dBuffer = cov3dBuffer;
+        this.maxSHDegree = vertices.maxSHDegree;
 
         // --- Compute Pipelines for Sorting ---
         const sortShaderModule = device.createShaderModule({

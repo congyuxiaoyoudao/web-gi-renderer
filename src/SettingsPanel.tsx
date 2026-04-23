@@ -28,7 +28,7 @@ export const GAUSSIAN_SCENES = [
 
 
 export function useSettings() {
-  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth } = useControls({
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree } = useControls({
     sphereColor: {
       value: '#ff0055',
       label: 'Sphere Color',
@@ -64,6 +64,13 @@ export function useSettings() {
     debugDepth: {
       value: false,
       label: 'Debug Depth',
+    },
+    shDegree: {
+      value: 3,
+      min: 0,
+      max: 3,
+      step: 1,
+      label: 'SH Degree',
     },
   });
 
@@ -155,7 +162,7 @@ export function useSettings() {
   }, []);
 
   return {
-    sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform,
+    sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree, gaussianTransform,
     uploadedGaussianUrl,
     cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath
   };

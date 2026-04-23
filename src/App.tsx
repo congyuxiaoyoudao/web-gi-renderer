@@ -25,7 +25,7 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, gaussianTransform }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } } }) {
+function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } } }) {
   const { scene } = useThree();
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
 
@@ -85,7 +85,7 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
         ]}
         background blur={0.8}
       />
-      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} debugDepth={debugDepth} gaussianTransform={gaussianTransform} />
+      <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} debugDepth={debugDepth} shDegree={shDegree} gaussianTransform={gaussianTransform} />
 
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
@@ -151,15 +151,39 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
 }
 
 export default function App() {
-  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, gaussianTransform,
+  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree, gaussianTransform,
     uploadedGaussianUrl, cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = useSettings();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
+  const [gpuDevice, setGpuDevice] = useState<GPUDevice | null | undefined>(undefined); // undefined = still initializing
   const gaussianScene = GAUSSIAN_SCENES[sceneIndex];
   const isNoneGaussianMode = gaussianScene.url === '';
   const isCustomGaussianMode = gaussianScene.url === '__custom__';
   const gaussianUrl = isCustomGaussianMode ? uploadedGaussianUrl : (isNoneGaussianMode ? '' : gaussianScene.url);
+
+  // Request device with adapter's actual max limits to avoid the 128MB default storage binding limit.
+  useEffect(() => {
+    (async () => {
+      try {
+        const adapter = await navigator.gpu?.requestAdapter();
+        if (!adapter) return;
+        const device = await adapter.requestDevice({
+          requiredLimits: {
+            maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+            maxBufferSize: adapter.limits.maxBufferSize,
+          }
+        });
+        setGpuDevice(device);
+      } catch (e) {
+        console.warn('Failed to create high-limit GPU device, falling back to default:', e);
+        setGpuDevice(null); // null = failed, render Canvas with default device
+      }
+    })();
+  }, []);
+
+  // Keep loader visible until both the timer fires AND the GPU device is ready
+  const gpuReady = gpuDevice !== undefined;
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 1000);
@@ -235,7 +259,7 @@ export default function App() {
 
   return (
     <div className="w-full h-screen bg-zinc-950">
-      <Loader loading={loading} />
+      <Loader loading={loading || !gpuReady} />
       <div className="absolute top-6 left-6 z-10 text-white font-sans pointer-events-none">
         <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">WebGPU PBR & GI</h1>
         <p className="text-zinc-400 text-sm mt-2 max-w-md">
@@ -253,11 +277,17 @@ export default function App() {
           Sort Method: <span id="perf-sort-method">{sortMethod}</span>
         </p>
       </div>
+      {gpuReady && (
       <Canvas
         shadows
         camera={{ position: [0, 2, 8], fov: 45 }}
         gl={(props) => {
-          const renderer = new WebGPURenderer({ canvas: props.canvas as HTMLCanvasElement, antialias: true, alpha: true });
+          const renderer = new WebGPURenderer({
+            canvas: props.canvas as HTMLCanvasElement,
+            antialias: true,
+            alpha: true,
+            ...(gpuDevice ? { device: gpuDevice } : {})
+          } as any);
           const originalRender = renderer.render.bind(renderer);
           const originalRenderAsync = renderer.renderAsync.bind(renderer);
           let initPromise = renderer.init();
@@ -286,10 +316,12 @@ export default function App() {
             onCameraReady={setCamera}
             gaussianUrl={gaussianUrl}
             debugDepth={debugDepth}
+            shDegree={shDegree}
             gaussianTransform={gaussianTransform}
           />
         </Suspense>
       </Canvas>
+      )}
       <Leva />
       {/* Camera Path Toolbar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
