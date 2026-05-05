@@ -122,6 +122,36 @@ export function useSettings() {
     setUploadControls({ customGaussianFile: uploadedGaussianName || 'No file loaded' });
   }, [uploadedGaussianName, setUploadControls]);
 
+  const [uploadedModelUrl, setUploadedModelUrl] = useState('');
+  const [uploadedModelName, setUploadedModelName] = useState('');
+
+  const loadModel = useCallback((file: File) => {
+    const objectUrl = URL.createObjectURL(file);
+    setUploadedModelUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return objectUrl; });
+    setUploadedModelName(file.name);
+  }, []);
+
+  useEffect(() => {
+    return () => { if (uploadedModelUrl) URL.revokeObjectURL(uploadedModelUrl); };
+  }, [uploadedModelUrl]);
+
+  const [, setModelControls] = useControls(() => ({
+    modelUpload: folder({
+      uploadModel: button(() => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.glb';
+        input.onchange = () => { const f = input.files?.[0]; if (f) loadModel(f); };
+        input.click();
+      }),
+      uploadedModelFile: { value: 'No model loaded', editable: false, label: 'Model' },
+    }, { order: 1000 }),
+  }), [loadModel]);
+
+  useEffect(() => {
+    setModelControls({ uploadedModelFile: uploadedModelName || 'No model loaded' });
+  }, [uploadedModelName, setModelControls]);
+
   const gaussianTransform = useControls('Gaussian Transform', {
     position: {
       value: { x: 0, y: 0, z: 0 },
@@ -164,6 +194,7 @@ export function useSettings() {
   return {
     sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree, gaussianTransform,
     uploadedGaussianUrl,
+    uploadedModelUrl,
     cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath
   };
 }

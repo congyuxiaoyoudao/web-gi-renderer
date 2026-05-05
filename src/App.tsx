@@ -6,6 +6,8 @@ import { Suspense, useRef, useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { CAMERA_PRESETS, useSettings, GAUSSIAN_SCENES } from '@/src/SettingsPanel';
 import { WebGPUSplat } from './WebGPUSplat';
+import { UploadedModel } from './UploadedModel';
+import { usePrimitives, PrimitivesScene, type ScenePrimitive, type GizmoMode } from './Primitives';
 import Loader from './Loader';
 
 function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
@@ -25,7 +27,7 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } } }) {
+function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform, modelUrl, primitives, selectedId, setSelectedId, gizmoMode }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }; modelUrl: string; primitives: ScenePrimitive[]; selectedId: string | null; setSelectedId: (id: string | null) => void; gizmoMode: GizmoMode }) {
   const { scene } = useThree();
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
 
@@ -87,6 +89,12 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
       />
       <WebGPUSplat url={gaussianUrl} splatRadius={splatRadius} sortMethod={sortMethod} debugDepth={debugDepth} shDegree={shDegree} gaussianTransform={gaussianTransform} />
 
+      {modelUrl && (
+        <Suspense fallback={null}>
+          <UploadedModel url={modelUrl} />
+        </Suspense>
+      )}
+
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
       <directionalLight position={[-10, 10, -10]} intensity={1} castShadow color="#ff0055" />
@@ -140,19 +148,22 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
         </mesh>
       </Float>
 
-      <mesh position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[50, 50, 1]} receiveShadow>
+      <mesh position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[50, 50, 1]} receiveShadow onClick={() => setSelectedId(null)}>
         <planeGeometry />
         <meshStandardMaterial color="#151515" roughness={0.8} metalness={0.2} />
       </mesh>
 
       <OrbitControls makeDefault enableZoom={true} minPolarAngle={0} maxPolarAngle={Math.PI / 2 + 0.1} />
+
+      <PrimitivesScene primitives={primitives} selectedId={selectedId} setSelectedId={setSelectedId} gizmoMode={gizmoMode} />
     </>
   );
 }
 
 export default function App() {
   const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree, gaussianTransform,
-    uploadedGaussianUrl, cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = useSettings();
+    uploadedGaussianUrl, uploadedModelUrl, cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = useSettings();
+  const { primitives, selectedId, setSelectedId, gizmoMode } = usePrimitives();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
@@ -318,6 +329,11 @@ export default function App() {
             debugDepth={debugDepth}
             shDegree={shDegree}
             gaussianTransform={gaussianTransform}
+            modelUrl={uploadedModelUrl}
+            primitives={primitives}
+            selectedId={selectedId}
+            setSelectedId={setSelectedId}
+            gizmoMode={gizmoMode}
           />
         </Suspense>
       </Canvas>
