@@ -135,6 +135,13 @@ export function WebGPUSplat({
 
         if (isMounted) {
           const newSplats = new Splats(device, gaussianBuffers, viewParamBindGroupLayout, format, depthFormat);
+
+          // Release large CPU arrays now that data is in GPU buffers.
+          const gb = gaussianBuffers as any;
+          gb.cov3d = null;
+          gb.colors = null;
+          gb.shCoeffs = null;
+
           setSplats(newSplats);
         }
       } catch (e) {
