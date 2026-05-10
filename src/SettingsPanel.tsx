@@ -28,6 +28,31 @@ export const GAUSSIAN_SCENES = [
 
 
 export function useSettings() {
+  const captureCanvasScreenshot = useCallback(() => {
+    const canvas = document.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!canvas) {
+      console.warn('No canvas found for screenshot capture');
+      return;
+    }
+
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        console.warn('Failed to capture canvas screenshot');
+        return;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      link.href = url;
+      link.download = `canvas-color-${timestamp}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  }, []);
+
   const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree } = useControls({
     sphereColor: {
       value: '#ff0055',
@@ -151,6 +176,14 @@ export function useSettings() {
   useEffect(() => {
     setModelControls({ uploadedModelFile: uploadedModelName || 'No model loaded' });
   }, [uploadedModelName, setModelControls]);
+
+  useControls(() => ({
+    capture: folder({
+      captureCanvasColor: button(() => {
+        captureCanvasScreenshot();
+      }),
+    }, { order: 1001 }),
+  }), [captureCanvasScreenshot]);
 
   const gaussianTransform = useControls('Gaussian Transform', {
     position: {
