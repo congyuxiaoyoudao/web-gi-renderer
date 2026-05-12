@@ -27,7 +27,16 @@ function MovingSpots({ positions = [2, 0, 2, 0, 2, 0, 2, 0] }) {
   );
 }
 
-function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform, modelUrl, primitives, selectedId, setSelectedId, gizmoMode }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }; modelUrl: string; primitives: ScenePrimitive[]; selectedId: string | null; setSelectedId: (id: string | null) => void; gizmoMode: GizmoMode }) {
+interface BenchmarkRef {
+  recording: boolean;
+  fpsSamples: number[];
+  memorySamples: number[];
+  peakMemory: number;
+  startTime: number;
+  duration: number;
+}
+
+function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform, modelUrl, primitives, selectedId, setSelectedId, gizmoMode, benchmarkRef, onBenchmarkDone }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }; modelUrl: string; primitives: ScenePrimitive[]; selectedId: string | null; setSelectedId: (id: string | null) => void; gizmoMode: GizmoMode; benchmarkRef: React.RefObject<BenchmarkRef>; onBenchmarkDone: React.RefObject<(() => void) | null> }) {
   const { scene } = useThree();
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
 
@@ -51,7 +60,8 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
       perfRef.current.prevTime = time;
       
       const memory = (performance as any).memory;
-      const memoryUsage = memory ? `${Math.round(memory.usedJSHeapSize / 1048576)} MB / ${Math.round(memory.totalJSHeapSize / 1048576)} MB` : 'N/A';
+      const memMB = memory ? memory.usedJSHeapSize / 1048576 : 0;
+      const memoryUsage = memory ? `${Math.round(memMB)} MB / ${Math.round(memory.totalJSHeapSize / 1048576)} MB` : 'N/A';
       
       const fpsEl = document.getElementById('perf-fps');
       if (fpsEl) fpsEl.innerText = `${fps} FPS`;
@@ -61,6 +71,18 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
 
       const sortEl = document.getElementById('perf-sort-method');
       if (sortEl) sortEl.innerText = sortMethod;
+
+      // Feed benchmark samples
+      const bm = benchmarkRef.current;
+      if (bm.recording) {
+        bm.fpsSamples.push(fps);
+        bm.memorySamples.push(memMB);
+        bm.peakMemory = Math.max(bm.peakMemory, memMB);
+        if (time - bm.startTime >= bm.duration * 1000) {
+          bm.recording = false;
+          onBenchmarkDone.current?.();
+        }
+      }
     }
   });
 
@@ -173,6 +195,30 @@ export default function App() {
   const isCustomGaussianMode = gaussianScene.url === '__custom__';
   const gaussianUrl = isCustomGaussianMode ? uploadedGaussianUrl : (isNoneGaussianMode ? '' : gaussianScene.url);
 
+  // Benchmark
+  const BENCHMARK_DURATION = 10; // seconds
+  const benchmarkRef = useRef<BenchmarkRef>({ recording: false, fpsSamples: [], memorySamples: [], peakMemory: 0, startTime: 0, duration: BENCHMARK_DURATION });
+  const onBenchmarkDone = useRef<(() => void) | null>(null);
+  const [isBenchmarking, setIsBenchmarking] = useState(false);
+  const [benchmarkResult, setBenchmarkResult] = useState<{ avgFps: number; avgMemory: number; peakMemory: number } | null>(null);
+
+  onBenchmarkDone.current = () => {
+    const { fpsSamples, memorySamples, peakMemory } = benchmarkRef.current;
+    const avg = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    setBenchmarkResult({
+      avgFps: Math.round(avg(fpsSamples)),
+      avgMemory: Math.round(avg(memorySamples)),
+      peakMemory: Math.round(peakMemory),
+    });
+    setIsBenchmarking(false);
+  };
+
+  const startBenchmark = () => {
+    benchmarkRef.current = { recording: true, fpsSamples: [], memorySamples: [], peakMemory: 0, startTime: performance.now(), duration: BENCHMARK_DURATION };
+    setBenchmarkResult(null);
+    setIsBenchmarking(true);
+  };
+
   // Request device with adapter's actual max limits to avoid the 128MB default storage binding limit.
   useEffect(() => {
     (async () => {
@@ -277,16 +323,34 @@ export default function App() {
           Real-time physically based rendering with global illumination (IBL) powered by React Three Fiber and Three.js WebGPU Renderer.
         </p>
       </div>
-      <div className="absolute bottom-6 left-6 z-10 text-white font-sans pointer-events-none">
-        <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500" id="perf-fps">
+      <div className="absolute bottom-6 left-6 z-10 text-white font-sans">
+        <h2 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500 pointer-events-none" id="perf-fps">
           0 FPS
         </h2>
-        <p className="text-zinc-400 text-sm mt-2 max-w-md">
+        <p className="text-zinc-400 text-sm mt-2 max-w-md pointer-events-none">
           Memory: <span id="perf-memory">N/A</span>
         </p>
-        <p className="text-zinc-400 text-sm mt-2 max-w-md">
+        <p className="text-zinc-400 text-sm mt-2 max-w-md pointer-events-none">
           Sort Method: <span id="perf-sort-method">{sortMethod}</span>
         </p>
+        <button
+          onClick={startBenchmark}
+          disabled={isBenchmarking}
+          className={`mt-3 px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${
+            isBenchmarking
+              ? 'border-yellow-500/50 text-yellow-400 cursor-default'
+              : 'border-zinc-600 text-zinc-300 hover:border-zinc-400 hover:text-white cursor-pointer'
+          }`}
+        >
+          {isBenchmarking ? `Benchmarking… (${BENCHMARK_DURATION}s)` : `Benchmark ${BENCHMARK_DURATION}s`}
+        </button>
+        {benchmarkResult && (
+          <div className="mt-2 text-xs text-zinc-400 space-y-0.5 pointer-events-none">
+            <p>Avg FPS: <span className="text-white font-mono">{benchmarkResult.avgFps}</span></p>
+            <p>Avg Mem: <span className="text-white font-mono">{benchmarkResult.avgMemory} MB</span></p>
+            <p>Peak Mem: <span className="text-white font-mono">{benchmarkResult.peakMemory} MB</span></p>
+          </div>
+        )}
       </div>
       {gpuReady && (
       <Canvas
@@ -334,6 +398,8 @@ export default function App() {
             selectedId={selectedId}
             setSelectedId={setSelectedId}
             gizmoMode={gizmoMode}
+            benchmarkRef={benchmarkRef}
+            onBenchmarkDone={onBenchmarkDone}
           />
         </Suspense>
       </Canvas>
