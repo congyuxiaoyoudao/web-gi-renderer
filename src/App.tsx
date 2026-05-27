@@ -1,10 +1,9 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, ContactShadows, OrbitControls, Float, Backdrop, Lightformer } from '@react-three/drei';
-import { Leva } from 'leva';
 import { WebGPURenderer } from 'three/webgpu';
 import { Suspense, useRef, useState, useEffect, useMemo } from 'react';
 import * as THREE from 'three';
-import { CAMERA_PRESETS, useSettings, GAUSSIAN_SCENES } from '@/src/SettingsPanel';
+import { CAMERA_PRESETS, useSettings, GAUSSIAN_SCENES, SettingsPanel } from '@/src/SettingsPanel';
 import { WebGPUSplat } from './WebGPUSplat';
 import { UploadedModel } from './UploadedModel';
 import { usePrimitives, PrimitivesScene, type ScenePrimitive, type GizmoMode } from './Primitives';
@@ -189,9 +188,10 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
 }
 
 export default function App() {
+  const settings = useSettings();
   const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree, gaussianTransform,
-    uploadedGaussianUrl, uploadedModelUrl, cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = useSettings();
-  const { primitives, selectedId, setSelectedId, gizmoMode } = usePrimitives();
+    uploadedGaussianUrl, uploadedModelUrl, cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = settings;
+  const { primitives, selectedId, setSelectedId, gizmoMode, setGizmoMode, addPrimitive, deleteSelected } = usePrimitives();
   const [camera, setCamera] = useState<THREE.PerspectiveCamera | null>(null);
   const [loading, setLoading] = useState(true);
   const [playing, setPlaying] = useState(false);
@@ -411,7 +411,7 @@ export default function App() {
         </Suspense>
       </Canvas>
       )}
-      <Leva />
+      <SettingsPanel {...settings} addPrimitive={addPrimitive} deleteSelected={deleteSelected} gizmoMode={gizmoMode} setGizmoMode={setGizmoMode} />
       {/* Camera Path Toolbar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
         <div className="flex items-center gap-0 bg-zinc-900/95 backdrop-blur-sm rounded-lg text-white font-sans overflow-hidden border border-zinc-700/50">

@@ -1,5 +1,4 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { useControls, button } from 'leva';
 import { TransformControls } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -16,8 +15,8 @@ export interface ScenePrimitive {
 export function usePrimitives() {
   const [primitives, setPrimitives] = useState<ScenePrimitive[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>('translate');
 
-  // Use a ref to avoid stale closure in Leva button handlers
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
 
@@ -27,24 +26,12 @@ export function usePrimitives() {
     setSelectedId(id);
   }, []);
 
-  const { gizmoMode } = useControls('Primitives', {
-    addBox: button(() => addPrimitive('box')),
-    addSphere: button(() => addPrimitive('sphere')),
-    addCylinder: button(() => addPrimitive('cylinder')),
-    addCone: button(() => addPrimitive('cone')),
-    addTorus: button(() => addPrimitive('torus')),
-    deleteSelected: button(() => {
-      setPrimitives((prev) => prev.filter((p) => p.id !== selectedIdRef.current));
-      setSelectedId(null);
-    }),
-    gizmoMode: {
-      value: 'translate',
-      options: { Translate: 'translate', Rotate: 'rotate', Scale: 'scale' },
-      label: 'Gizmo Mode',
-    },
-  });
+  const deleteSelected = useCallback(() => {
+    setPrimitives((prev) => prev.filter((p) => p.id !== selectedIdRef.current));
+    setSelectedId(null);
+  }, []);
 
-  return { primitives, selectedId, setSelectedId, gizmoMode: gizmoMode as GizmoMode };
+  return { primitives, selectedId, setSelectedId, gizmoMode, setGizmoMode, addPrimitive, deleteSelected };
 }
 
 // Individual primitive with its own gizmo when selected
