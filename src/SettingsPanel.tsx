@@ -9,20 +9,23 @@ export const CAMERA_PRESETS = [
 ];
 
 export const GAUSSIAN_SCENES = [
-  { name: 'None', url: '' },
-  { name: 'Custom', url: '__custom__' },
-  { name: 'Food', url: 'assets/food.ply' },
+  { name: 'None', url: '', envDir: 'assets/bicycle' },
+  { name: 'Custom', url: '__custom__', envDir: 'assets/bicycle' },
+  { name: 'Food', url: 'assets/food.ply', envDir: 'assets/bicycle' },
   {
     name: 'Bicycle (HuggingFace)',
-    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bicycle/point_cloud/iteration_7000/point_cloud.ply'
+    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bicycle/point_cloud/iteration_7000/point_cloud.ply',
+    envDir: 'assets/bicycle',
   },
   {
     name: 'Bonsai (HuggingFace)',
-    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bonsai/point_cloud/iteration_7000/point_cloud.ply'
+    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/bonsai/point_cloud/iteration_7000/point_cloud.ply',
+    envDir: 'assets/bonsai',
   },
   {
     name: 'Stump (HuggingFace)',
-    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/stump/point_cloud/iteration_7000/point_cloud.ply'
+    url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/stump/point_cloud/iteration_7000/point_cloud.ply',
+    envDir: 'assets/stump',
   },
 ];
 

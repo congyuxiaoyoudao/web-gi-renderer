@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, ContactShadows, OrbitControls, Float, Backdrop, Lightformer } from '@react-three/drei';
 import { Leva } from 'leva';
 import { WebGPURenderer } from 'three/webgpu';
-import { Suspense, useRef, useState, useEffect } from 'react';
+import { Suspense, useRef, useState, useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { CAMERA_PRESETS, useSettings, GAUSSIAN_SCENES } from '@/src/SettingsPanel';
 import { WebGPUSplat } from './WebGPUSplat';
@@ -36,20 +36,22 @@ interface BenchmarkRef {
   duration: number;
 }
 
-function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform, modelUrl, primitives, selectedId, setSelectedId, gizmoMode, benchmarkRef, onBenchmarkDone }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }; modelUrl: string; primitives: ScenePrimitive[]; selectedId: string | null; setSelectedId: (id: string | null) => void; gizmoMode: GizmoMode; benchmarkRef: React.RefObject<BenchmarkRef>; onBenchmarkDone: React.RefObject<(() => void) | null> }) {
+function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform, modelUrl, primitives, selectedId, setSelectedId, gizmoMode, benchmarkRef, onBenchmarkDone, envDir }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }; modelUrl: string; primitives: ScenePrimitive[]; selectedId: string | null; setSelectedId: (id: string | null) => void; gizmoMode: GizmoMode; benchmarkRef: React.RefObject<BenchmarkRef>; onBenchmarkDone: React.RefObject<(() => void) | null>; envDir: string }) {
   const { scene } = useThree();
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
 
-  // Sync environment/background rotation with gaussian transform
-  useEffect(() => {
-    const euler = new THREE.Euler(
+  // Pre-compute the environment euler from the gaussian transform.
+  // Gaussian model matrix = Translation × Rotation(euler) × Scale(1,-1,-1).
+  // Scale(1,-1,-1) ≡ RotationX(180°), so add that flip plus the empirical +90° correction.
+  const envEuler = useMemo(() => {
+    const rotMatrix = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(
       gaussianTransform.rotation.x * Math.PI / 180,
       gaussianTransform.rotation.y * Math.PI / 180,
       gaussianTransform.rotation.z * Math.PI / 180
-    );
-    scene.environmentRotation.copy(euler);
-    scene.backgroundRotation.copy(euler);
-  }, [gaussianTransform.rotation.x, gaussianTransform.rotation.y, gaussianTransform.rotation.z, scene]);
+    ));
+    rotMatrix.multiply(new THREE.Matrix4().makeRotationX(Math.PI * 2.5));
+    return new THREE.Euler().setFromRotationMatrix(rotMatrix);
+  }, [gaussianTransform.rotation.x, gaussianTransform.rotation.y, gaussianTransform.rotation.z]);
 
   useFrame(() => {
     perfRef.current.frames++;
@@ -84,6 +86,10 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
         }
       }
     }
+    // Sync environment rotation every frame — drei's <Environment> re-renders
+    // can reset scene.backgroundRotation, so we enforce it here unconditionally.
+    scene.environmentRotation.copy(envEuler);
+    scene.backgroundRotation.copy(envEuler);
   });
 
   const camera = useFrame((state) => {
@@ -100,12 +106,12 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
       {/* <Environment files="https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/potsdamer_platz_1k.hdr" background blur={0.0} /> */}
       <Environment
         files={[
-          'assets/px.jpg',
-          'assets/nx.jpg',
-          'assets/py.jpg',
-          'assets/ny.jpg',
-          'assets/pz.jpg',
-          'assets/nz.jpg',
+          `${envDir}/px.jpg`,
+          `${envDir}/nx.jpg`,
+          `${envDir}/py.jpg`,
+          `${envDir}/ny.jpg`,
+          `${envDir}/pz.jpg`,
+          `${envDir}/nz.jpg`,
         ]}
         background blur={0.8}
       />
@@ -400,6 +406,7 @@ export default function App() {
             gizmoMode={gizmoMode}
             benchmarkRef={benchmarkRef}
             onBenchmarkDone={onBenchmarkDone}
+            envDir={gaussianScene.envDir}
           />
         </Suspense>
       </Canvas>
