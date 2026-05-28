@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { parseAndConvert, type ThreeCamera } from './colmapCamera';
-import type { GizmoMode, PrimitiveGeoType } from './Primitives';
+import type { GizmoMode, PrimitiveGeoType, ScenePrimitive } from './Primitives';
+import type { UploadedModelData } from './UploadedModel';
 
 export const CAMERA_PRESETS = [
   { name: 'Front View', position: [0, 2, 8] },
@@ -237,6 +238,31 @@ function SubLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+function MaterialPreview({ color, metallic, roughness }: { color: string; metallic: number; roughness: number }) {
+  // Simulate specular highlight: strong when metallic high, tight when roughness low
+  const specularAlpha = metallic * (1 - roughness * 0.75);
+  const highlightPct = Math.round(10 + (1 - roughness) * 28);
+  return (
+    <div
+      className="relative w-[56px] h-[56px] rounded-full border border-[#30363d] overflow-hidden shrink-0"
+      style={{ backgroundColor: color }}
+    >
+      {/* Edge darkening to simulate sphere curvature */}
+      <div className="absolute inset-0" style={{
+        background: 'radial-gradient(circle at 50% 50%, transparent 30%, rgba(0,0,0,0.72) 100%)'
+      }} />
+      {/* Specular highlight — upper-left */}
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(circle at 33% 28%, rgba(255,255,255,${(specularAlpha * 0.9).toFixed(2)}) 0%, transparent ${highlightPct}%)`
+      }} />
+      {/* Subtle secondary shadow — lower-right */}
+      <div className="absolute inset-0" style={{
+        background: 'radial-gradient(circle at 68% 72%, rgba(0,0,0,0.28) 0%, transparent 45%)'
+      }} />
+    </div>
+  );
+}
+
 // ─── Settings Hook ────────────────────────────────────────────────────────────
 
 export function useSettings() {
@@ -251,26 +277,17 @@ export function useSettings() {
     position: { x: 0, y: 0, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
   });
-  const [uploadedGaussianUrl, setUploadedGaussianUrl] = useState('');
+  const [uploadedGaussianUrl, setUploadedGaussianUrl] = useState('');  
   const [uploadedGaussianName, setUploadedGaussianName] = useState('');
-  const [uploadedModelUrl, setUploadedModelUrl] = useState('');
-  const [uploadedModelName, setUploadedModelName] = useState('');
   const [cameraFrames, setCameraFrames] = useState<ThreeCamera[]>([]);
   const [cameraFrameIndex, setCameraFrameIndex] = useState(0);
 
   useEffect(() => () => { if (uploadedGaussianUrl) URL.revokeObjectURL(uploadedGaussianUrl); }, [uploadedGaussianUrl]);
-  useEffect(() => () => { if (uploadedModelUrl) URL.revokeObjectURL(uploadedModelUrl); }, [uploadedModelUrl]);
 
   const loadGaussianPly = useCallback((file: File) => {
     const objectUrl = URL.createObjectURL(file);
     setUploadedGaussianUrl(prev => { if (prev) URL.revokeObjectURL(prev); return objectUrl; });
     setUploadedGaussianName(file.name);
-  }, []);
-
-  const loadModel = useCallback((file: File) => {
-    const objectUrl = URL.createObjectURL(file);
-    setUploadedModelUrl(prev => { if (prev) URL.revokeObjectURL(prev); return objectUrl; });
-    setUploadedModelName(file.name);
   }, []);
 
   const loadCameraJson = useCallback((file: File) => {
@@ -318,9 +335,8 @@ export function useSettings() {
     shDegree, setShDegree,
     gaussianTransform, setGaussianTransform,
     uploadedGaussianUrl, uploadedGaussianName,
-    uploadedModelUrl, uploadedModelName,
     cameraFrames, cameraFrameIndex, setCameraFrameIndex,
-    loadGaussianPly, loadModel, loadCameraJson, clearCameraPath,
+    loadGaussianPly, loadCameraJson, clearCameraPath,
     captureCanvasScreenshot,
   };
 }
@@ -334,9 +350,20 @@ type PrimitivesControlsProps = {
   deleteSelected: () => void;
   gizmoMode: GizmoMode;
   setGizmoMode: (mode: GizmoMode) => void;
+  selectedPrimitive: ScenePrimitive | null;
+  updatePrimitive: (id: string, patch: Partial<Pick<ScenePrimitive, 'color' | 'metallic' | 'roughness'>>) => void;
 };
 
-export function SettingsPanel(props: SettingsProps & PrimitivesControlsProps) {
+type ModelsControlsProps = {
+  models: UploadedModelData[];
+  selectedModel: UploadedModelData | null;
+  setSelectedModelId: (id: string | null) => void;
+  addModel: (file: File) => void;
+  removeModel: (id: string) => void;
+  updateModel: (id: string, patch: Partial<UploadedModelData>) => void;
+};
+
+export function SettingsPanel(props: SettingsProps & PrimitivesControlsProps & ModelsControlsProps) {
   const [collapsed, setCollapsed] = useState(false);
   const {
     sphereColor, setSphereColor,
@@ -348,10 +375,11 @@ export function SettingsPanel(props: SettingsProps & PrimitivesControlsProps) {
     shDegree, setShDegree,
     gaussianTransform, setGaussianTransform,
     uploadedGaussianName,
-    uploadedModelName,
-    loadGaussianPly, loadModel,
+    loadGaussianPly,
     captureCanvasScreenshot,
     addPrimitive, deleteSelected, gizmoMode, setGizmoMode,
+    selectedPrimitive, updatePrimitive,
+    models, selectedModel, setSelectedModelId, addModel, removeModel, updateModel,
   } = props;
 
   const setPos = (axis: 'x' | 'y' | 'z', v: number) =>
@@ -376,7 +404,7 @@ export function SettingsPanel(props: SettingsProps & PrimitivesControlsProps) {
       </div>
 
       {/* Scrollable body */}
-      <div className={`flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded-sm transition-opacity duration-150 ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+      <div className={`flex-1 overflow-y-auto [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#30363d] [&::-webkit-scrollbar-thumb]:rounded-sm transition-opacity duration-150 ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
 
         <Section title="Render">
           <Row label="Sort Method">
@@ -407,9 +435,6 @@ export function SettingsPanel(props: SettingsProps & PrimitivesControlsProps) {
               options={CAMERA_PRESETS.map((p, i) => ({ label: p.name, value: i }))}
               onChange={v => setCameraPreset(v)}
             />
-          </Row>
-          <Row label="Sphere Color" dot={sphereColor}>
-            <ColorPicker value={sphereColor} onChange={setSphereColor} />
           </Row>
         </Section>
 
@@ -468,15 +493,115 @@ export function SettingsPanel(props: SettingsProps & PrimitivesControlsProps) {
           </div>
         </Section>
 
+        {selectedPrimitive && (
+          <Section title="Material">
+            {/* Preview + meta */}
+            <div className="px-3 pt-3 pb-2 flex items-center gap-3">
+              <MaterialPreview
+                color={selectedPrimitive.color}
+                metallic={selectedPrimitive.metallic}
+                roughness={selectedPrimitive.roughness}
+              />
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className="text-[11px] font-medium text-[#c9cdd3] capitalize">{selectedPrimitive.type}</span>
+                <span className="text-[10px] text-[#484f58]">Standard Material</span>
+                <div className="flex gap-1 mt-0.5">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-[2px] bg-[#161b22] border border-[#30363d] text-[#7d8590] font-mono">
+                    M {selectedPrimitive.metallic.toFixed(2)}
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-[2px] bg-[#161b22] border border-[#30363d] text-[#7d8590] font-mono">
+                    R {selectedPrimitive.roughness.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="mx-3 mb-2 h-px bg-[#21262d]" />
+            <Row label="Base Color">
+              <ColorPicker
+                value={selectedPrimitive.color}
+                onChange={c => updatePrimitive(selectedPrimitive.id, { color: c })}
+              />
+            </Row>
+            <Row label="Metallic">
+              <RangeSlider
+                value={selectedPrimitive.metallic}
+                min={0} max={1} step={0.01}
+                onChange={v => updatePrimitive(selectedPrimitive.id, { metallic: v })}
+              />
+            </Row>
+            <Row label="Roughness">
+              <RangeSlider
+                value={selectedPrimitive.roughness}
+                min={0} max={1} step={0.01}
+                onChange={v => updatePrimitive(selectedPrimitive.id, { roughness: v })}
+              />
+            </Row>
+            <div className="h-2" />
+          </Section>
+        )}
+
+        {selectedModel && (
+          <Section title="Model Material">
+            <div className="px-3 pt-3 pb-2 flex items-center gap-3">
+              <MaterialPreview color="#888888" metallic={selectedModel.metallic} roughness={selectedModel.roughness} />
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className="text-[11px] font-medium text-[#c9cdd3] truncate">{selectedModel.name}</span>
+                <span className="text-[10px] text-[#484f58]">Material Override</span>
+                <div className="flex gap-1 mt-0.5">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-[2px] bg-[#161b22] border border-[#30363d] text-[#7d8590] font-mono">
+                    M {selectedModel.metallic.toFixed(2)}
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-[2px] bg-[#161b22] border border-[#30363d] text-[#7d8590] font-mono">
+                    R {selectedModel.roughness.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="mx-3 mb-2 h-px bg-[#21262d]" />
+            <Row label="Metallic">
+              <RangeSlider value={selectedModel.metallic} min={0} max={1} step={0.01}
+                onChange={v => updateModel(selectedModel.id, { metallic: v })} />
+            </Row>
+            <Row label="Roughness">
+              <RangeSlider value={selectedModel.roughness} min={0} max={1} step={0.01}
+                onChange={v => updateModel(selectedModel.id, { roughness: v })} />
+            </Row>
+            <div className="h-2" />
+          </Section>
+        )}
+
         <Section title="Upload">
           <div className="px-3 py-2 space-y-1.5">
             <UploadBtn label="Gaussian PLY" accept=".ply" onFile={loadGaussianPly} />
             <FileChip name={uploadedGaussianName} />
           </div>
           <div className="px-3 py-2 space-y-1.5 border-t border-[#25262b]">
-            <UploadBtn label="3D Model GLB" accept=".glb" onFile={loadModel} />
-            <FileChip name={uploadedModelName} />
+            <UploadBtn label="Add GLB Model" accept=".glb,.gltf" onFile={addModel} />
           </div>
+          {models.length > 0 && (
+            <div className="px-3 pb-2 flex flex-col gap-0.5">
+              {models.map(m => (
+                <div
+                  key={m.id}
+                  onClick={() => setSelectedModelId(selectedModel?.id === m.id ? null : m.id)}
+                  className={`flex items-center gap-2 px-2 py-1 rounded-[3px] cursor-pointer transition-colors ${
+                    selectedModel?.id === m.id
+                      ? 'bg-[#1f6feb]/20 border border-[#1f6feb]/40'
+                      : 'border border-transparent hover:bg-[#1c2128]'
+                  }`}
+                >
+                  <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${
+                    selectedModel?.id === m.id ? 'bg-[#58a6ff]' : 'bg-[#484f58]'
+                  }`} />
+                  <span className="text-[10px] text-[#c9cdd3] truncate flex-1 font-mono">{m.name}</span>
+                  <button
+                    onClick={e => { e.stopPropagation(); removeModel(m.id); }}
+                    className="text-[#484f58] hover:text-[#ff6b6b] text-[14px] font-bold cursor-pointer leading-none shrink-0"
+                  >×</button>
+                </div>
+              ))}
+            </div>
+          )}
         </Section>
 
         <Section title="Tools">

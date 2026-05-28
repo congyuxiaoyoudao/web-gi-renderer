@@ -10,6 +10,8 @@ export interface ScenePrimitive {
   id: string;
   type: PrimitiveGeoType;
   color: string;
+  metallic: number;
+  roughness: number;
 }
 
 export function usePrimitives() {
@@ -22,7 +24,7 @@ export function usePrimitives() {
 
   const addPrimitive = useCallback((type: PrimitiveGeoType) => {
     const id = crypto.randomUUID();
-    setPrimitives((prev) => [...prev, { id, type, color: '#aaaaaa' }]);
+    setPrimitives((prev) => [...prev, { id, type, color: '#aaaaaa', metallic: 0.0, roughness: 0.5 }]);
     setSelectedId(id);
   }, []);
 
@@ -31,7 +33,11 @@ export function usePrimitives() {
     setSelectedId(null);
   }, []);
 
-  return { primitives, selectedId, setSelectedId, gizmoMode, setGizmoMode, addPrimitive, deleteSelected };
+  const updatePrimitive = useCallback((id: string, patch: Partial<Pick<ScenePrimitive, 'color' | 'metallic' | 'roughness'>>) => {
+    setPrimitives(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+  }, []);
+
+  return { primitives, selectedId, setSelectedId, gizmoMode, setGizmoMode, addPrimitive, deleteSelected, updatePrimitive };
 }
 
 // Individual primitive with its own gizmo when selected
@@ -82,8 +88,8 @@ function PrimitiveItem({
           {primitive.type === 'torus' && <torusGeometry args={[0.4, 0.15, 16, 64]} />}
           <meshStandardMaterial
             color={primitive.color}
-            roughness={0.5}
-            metalness={0.2}
+            roughness={primitive.roughness}
+            metalness={primitive.metallic}
             emissive={isSelected ? '#1c1c1c' : '#000000'}
           />
         </mesh>
