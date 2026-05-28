@@ -328,9 +328,9 @@ export default function App() {
     <div className="w-full h-screen bg-zinc-950">
       <Loader loading={loading || !gpuReady} />
       <div className="absolute top-6 left-6 z-10 text-white font-sans pointer-events-none">
-        <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">WebGPU PBR & GI</h1>
+        <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">Web GI Renderer</h1>
         <p className="text-zinc-400 text-sm mt-2 max-w-md">
-          Real-time physically based rendering with global illumination (IBL) powered by React Three Fiber and Three.js WebGPU Renderer.
+          Real-time PBR with global illumination (IBL) powered by React Three Fiber and Three.js WebGPU Renderer. Combine both 3D gaussian scenes and traditional meshes.
         </p>
       </div>
       <div className="absolute bottom-6 left-6 z-10 text-white font-sans">
