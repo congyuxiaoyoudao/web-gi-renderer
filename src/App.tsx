@@ -35,7 +35,7 @@ interface BenchmarkRef {
   duration: number;
 }
 
-function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform, models, selectedModelId, setSelectedModelId, updateModel, primitives, selectedId, setSelectedId, gizmoMode, benchmarkRef, onBenchmarkDone, envDir }: { sphereColor: string; splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }; models: UploadedModelData[]; selectedModelId: string | null; setSelectedModelId: (id: string | null) => void; updateModel: (id: string, patch: Partial<UploadedModelData>) => void; primitives: ScenePrimitive[]; selectedId: string | null; setSelectedId: (id: string | null) => void; gizmoMode: GizmoMode; benchmarkRef: React.RefObject<BenchmarkRef>; onBenchmarkDone: React.RefObject<(() => void) | null>; envDir: string }) {
+function Scene({ splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth, shDegree, gaussianTransform, models, selectedModelId, setSelectedModelId, updateModel, primitives, selectedId, setSelectedId, gizmoMode, benchmarkRef, onBenchmarkDone, envDir, showDefaultScene }: { splatRadius: number; sortMethod: string; onCameraReady?: (cam: THREE.PerspectiveCamera) => void; gaussianUrl: string; debugDepth: boolean; shDegree: number; gaussianTransform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } }; models: UploadedModelData[]; selectedModelId: string | null; setSelectedModelId: (id: string | null) => void; updateModel: (id: string, patch: Partial<UploadedModelData>) => void; primitives: ScenePrimitive[]; selectedId: string | null; setSelectedId: (id: string | null) => void; gizmoMode: GizmoMode; benchmarkRef: React.RefObject<BenchmarkRef>; onBenchmarkDone: React.RefObject<(() => void) | null>; envDir: string; showDefaultScene: boolean }) {
   const { scene } = useThree();
   const perfRef = useRef({ frames: 0, prevTime: performance.now() });
 
@@ -128,61 +128,65 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
       <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
       <directionalLight position={[-10, 10, -10]} intensity={1} castShadow color="#ff0055" />
 
-      <Float speed={2} rotationIntensity={1.5} floatIntensity={2}>
-        <mesh position={[0, 1, 0]} castShadow receiveShadow>
-          <torusKnotGeometry args={[1, 0.3, 256, 64]} />
-          <meshPhysicalMaterial
-            color="#ffffff"
-            metalness={0.1}
-            roughness={0.05}
-            transmission={1}
-            ior={1.5}
-            thickness={2}
-            clearcoat={1}
-            clearcoatRoughness={0.1}
-            iridescence={1}
-            iridescenceIOR={1.3}
-            iridescenceThicknessRange={[100, 400]}
-            attenuationColor="#ffffff"
-            attenuationDistance={2}
-          />
-        </mesh>
-      </Float>
+      {showDefaultScene && (
+        <>
+          <Float speed={2} rotationIntensity={1.5} floatIntensity={2}>
+            <mesh position={[0, 1, 0]} castShadow receiveShadow>
+              <torusKnotGeometry args={[1, 0.3, 256, 64]} />
+              <meshPhysicalMaterial
+                color="#ffffff"
+                metalness={0.1}
+                roughness={0.05}
+                transmission={1}
+                ior={1.5}
+                thickness={2}
+                clearcoat={1}
+                clearcoatRoughness={0.1}
+                iridescence={1}
+                iridescenceIOR={1.3}
+                iridescenceThicknessRange={[100, 400]}
+                attenuationColor="#ffffff"
+                attenuationDistance={2}
+              />
+            </mesh>
+          </Float>
 
-      <Float speed={1.5} rotationIntensity={2} floatIntensity={1.5}>
-        <mesh position={[-2.5, 0, -2]} castShadow receiveShadow>
-          <sphereGeometry args={[0.8, 64, 64]} />
-          <meshPhysicalMaterial
-            color={sphereColor}
-            metalness={0.9}
-            roughness={0.1}
-            clearcoat={1}
-          />
-        </mesh>
-      </Float>
+          <Float speed={1.5} rotationIntensity={2} floatIntensity={1.5}>
+            <mesh position={[-2.5, 0, -2]} castShadow receiveShadow>
+              <sphereGeometry args={[0.8, 64, 64]} />
+              <meshPhysicalMaterial
+                color="#ff0055"
+                metalness={0.9}
+                roughness={0.1}
+                clearcoat={1}
+              />
+            </mesh>
+          </Float>
 
-      <Float speed={2.5} rotationIntensity={1} floatIntensity={2.5}>
-        <mesh position={[2.5, 0.5, -1]} castShadow receiveShadow>
-          <boxGeometry args={[1.2, 1.2, 1.2]} />
-          <meshPhysicalMaterial 
-            color="#0055ff"
-            metalness={0.1}
-            roughness={0.2}
-            transmission={0.9}
-            ior={1.4}
-            thickness={1}
-            attenuationColor="#0055ff"
-            attenuationDistance={2}
-          />
-        </mesh>
-      </Float>
+          <Float speed={2.5} rotationIntensity={1} floatIntensity={2.5}>
+            <mesh position={[2.5, 0.5, -1]} castShadow receiveShadow>
+              <boxGeometry args={[1.2, 1.2, 1.2]} />
+              <meshPhysicalMaterial
+                color="#0055ff"
+                metalness={0.1}
+                roughness={0.2}
+                transmission={0.9}
+                ior={1.4}
+                thickness={1}
+                attenuationColor="#0055ff"
+                attenuationDistance={2}
+              />
+            </mesh>
+          </Float>
 
-      <mesh position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[50, 50, 1]} receiveShadow onClick={() => setSelectedId(null)}>
-        <planeGeometry />
-        <meshStandardMaterial color="#151515" roughness={0.8} metalness={0.2} />
-      </mesh>
+          <mesh position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]} scale={[50, 50, 1]} receiveShadow onClick={() => setSelectedId(null)}>
+            <planeGeometry />
+            <meshStandardMaterial color="#151515" roughness={0.8} metalness={0.2} />
+          </mesh>
+        </>
+      )}
 
-      <OrbitControls makeDefault enableZoom={true} minPolarAngle={0} maxPolarAngle={Math.PI / 2 + 0.1} />
+      <OrbitControls makeDefault />
 
       <PrimitivesScene primitives={primitives} selectedId={selectedId} setSelectedId={setSelectedId} gizmoMode={gizmoMode} />
     </>
@@ -191,8 +195,9 @@ function Scene({ sphereColor, splatRadius, sortMethod, onCameraReady, gaussianUr
 
 export default function App() {
   const settings = useSettings();
-  const { sphereColor, cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree, gaussianTransform,
-    uploadedGaussianUrl, cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath } = settings;
+  const { cameraPreset, sortMethod, splatRadius, sceneIndex, debugDepth, shDegree, gaussianTransform,
+    uploadedGaussianUrl, cameraFrames, cameraFrameIndex, setCameraFrameIndex, loadCameraJson, clearCameraPath,
+    showDefaultScene } = settings;
   const { primitives, selectedId, setSelectedId, gizmoMode, setGizmoMode, addPrimitive, deleteSelected, updatePrimitive } = usePrimitives();
   const { models, selectedModelId, setSelectedModelId, selectedModel, addModel, removeModel, updateModel } = useModels();
   const selectedPrimitive = primitives.find(p => p.id === selectedId) ?? null;
@@ -395,7 +400,6 @@ export default function App() {
       >
         <Suspense fallback={null}>
           <Scene
-            sphereColor={sphereColor}
             splatRadius={splatRadius}
             sortMethod={sortMethod}
             onCameraReady={setCamera}
@@ -414,6 +418,7 @@ export default function App() {
             benchmarkRef={benchmarkRef}
             onBenchmarkDone={onBenchmarkDone}
             envDir={gaussianScene.envDir}
+            showDefaultScene={showDefaultScene}
           />
         </Suspense>
       </Canvas>

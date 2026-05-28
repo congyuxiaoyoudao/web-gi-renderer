@@ -281,6 +281,7 @@ export function useSettings() {
   const [uploadedGaussianName, setUploadedGaussianName] = useState('');
   const [cameraFrames, setCameraFrames] = useState<ThreeCamera[]>([]);
   const [cameraFrameIndex, setCameraFrameIndex] = useState(0);
+  const [showDefaultScene, setShowDefaultScene] = useState(true);
 
   useEffect(() => () => { if (uploadedGaussianUrl) URL.revokeObjectURL(uploadedGaussianUrl); }, [uploadedGaussianUrl]);
 
@@ -338,6 +339,7 @@ export function useSettings() {
     cameraFrames, cameraFrameIndex, setCameraFrameIndex,
     loadGaussianPly, loadCameraJson, clearCameraPath,
     captureCanvasScreenshot,
+    showDefaultScene, setShowDefaultScene,
   };
 }
 
@@ -374,6 +376,7 @@ export function SettingsPanel(props: SettingsProps & PrimitivesControlsProps & M
     debugDepth, setDebugDepth,
     shDegree, setShDegree,
     gaussianTransform, setGaussianTransform,
+    showDefaultScene, setShowDefaultScene,
     uploadedGaussianName,
     loadGaussianPly,
     captureCanvasScreenshot,
@@ -434,6 +437,13 @@ export function SettingsPanel(props: SettingsProps & PrimitivesControlsProps & M
               value={cameraPreset}
               options={CAMERA_PRESETS.map((p, i) => ({ label: p.name, value: i }))}
               onChange={v => setCameraPreset(v)}
+            />
+          </Row>
+          <Row label="Default Scene">
+            <ButtonGroup
+              options={['on', 'off']}
+              value={showDefaultScene ? 'on' : 'off'}
+              onChange={v => setShowDefaultScene(v === 'on')}
             />
           </Row>
         </Section>
