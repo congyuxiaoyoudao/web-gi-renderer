@@ -24,9 +24,9 @@ export function WebGPUSplat({
   const [splats, setSplats] = useState<Splats | null>(null);
   const [viewParamBindGroup, setViewParamBindGroup] = useState<GPUBindGroup | null>(null);
   const buffersRef = useRef<any>({});
-
-  // Three.js render target for depth prepass
   const depthRenderTargetRef = useRef<THREE.RenderTarget | null>(null);
+  // Reuse a single material for the depth prepass — never recreate per-frame
+  const depthOverrideMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -38,25 +38,15 @@ export function WebGPUSplat({
       if (!device) return;
 
       const format = navigator.gpu.getPreferredCanvasFormat();
+      // depth32float is guaranteed because we create DepthTexture with THREE.FloatType
+      const depthFormat: GPUTextureFormat = 'depth32float';
+
       const dpr = window.devicePixelRatio;
       const width = Math.floor(size.width * dpr);
       const height = Math.floor(size.height * dpr);
-
-      // Create Three.js RenderTarget for depth prepass
-      // Use FloatType for depth32float format compatibility
       const depthTexture = new THREE.DepthTexture(width, height, THREE.FloatType);
-      const depthRenderTarget = new THREE.RenderTarget(width, height, {
-        depthTexture: depthTexture
-      });
-      depthRenderTargetRef.current = depthRenderTarget;
-
-      // Get the actual depth format from the render target's GPU texture
-      // Three.js uses depth24plus for UnsignedIntType and depth32float for FloatType
-      let depthFormat: GPUTextureFormat = 'depth32float';
-      const rtTextureData = backend.get(depthRenderTarget.depthTexture);
-      if (rtTextureData?.texture) {
-        depthFormat = rtTextureData.format as GPUTextureFormat || 'depth32float';
-      }
+      depthRenderTargetRef.current = new THREE.RenderTarget(width, height, { depthTexture });
+      depthOverrideMaterialRef.current = new THREE.MeshBasicMaterial({ colorWrite: false });
 
       const viewParamBindGroupLayout = device.createBindGroupLayout({
         entries: [
@@ -153,9 +143,10 @@ export function WebGPUSplat({
 
     return () => {
       isMounted = false;
-      if (depthRenderTargetRef.current) {
-        depthRenderTargetRef.current.dispose();
-      }
+      depthRenderTargetRef.current?.dispose();
+      depthRenderTargetRef.current = null;
+      depthOverrideMaterialRef.current?.dispose();
+      depthOverrideMaterialRef.current = null;
     };
   }, [gl, size.width, size.height, url]);
 
@@ -243,58 +234,44 @@ export function WebGPUSplat({
         }
       }
 
-      // Step 1: Render scene depth to RenderTarget
-      if (depthRenderTargetRef.current) {
-        const originalOverride = scene.overrideMaterial;
-        // Use a simple material that writes depth only
-        scene.overrideMaterial = new THREE.MeshBasicMaterial({
-          color: 0xffffff,
-          depthWrite: true,
-          depthTest: true,
-          colorWrite: false  // Don't write color, only depth
-        });
-
+      // Step 1: Depth prepass — render scene to RenderTarget so Three.js allocates the depth GPU texture
+      if (depthRenderTargetRef.current && depthOverrideMaterialRef.current) {
+        const savedOverride = scene.overrideMaterial;
+        scene.overrideMaterial = depthOverrideMaterialRef.current;
         try {
           (gl as any).setRenderTarget(depthRenderTargetRef.current);
           (gl as any).render(scene, camera);
           (gl as any).setRenderTarget(null);
-        } catch (err) {
-          console.error('Failed to render depth prepass:', err);
+        } finally {
+          scene.overrideMaterial = savedOverride;
         }
-
-        scene.overrideMaterial = originalOverride;
       }
 
       // Step 2: Render scene color to canvas
       (gl as any).render(scene, camera);
 
-      // Step 3: Get depth texture from our render target for depth testing
+      // Step 3: Extract depth GPU texture — available after the first prepass
       let depthTextureView: GPUTextureView | null = null;
       if (depthRenderTargetRef.current?.depthTexture) {
-        const textureData = backend.get(depthRenderTargetRef.current.depthTexture);
-        if (textureData?.texture) {
-          depthTextureView = (textureData.texture as GPUTexture).createView();
-        }
+        const td = backend.get(depthRenderTargetRef.current.depthTexture);
+        if (td?.texture) depthTextureView = (td.texture as GPUTexture).createView();
       }
-
       if (!depthTextureView) {
-        console.warn('Depth texture not available');
+        // First frame before Three.js allocates the texture — skip splat render this frame
+        device.queue.submit([commandEncoder.finish()]);
         return;
       }
 
-      // Step 4: Render splats with depth testing
-      // We need to render to the canvas color and use our depth texture
+      // Step 4: Render splats on top with depth test
       const renderPassDesc: GPURenderPassDescriptor = {
         colorAttachments: [{
-            view: context.getCurrentTexture().createView(),
-            loadOp: "load",
-            storeOp: "store"
+          view: context.getCurrentTexture().createView(),
+          loadOp: "load",
+          storeOp: "store"
         }],
-        // Attach our pre-rendered depth texture for depth testing
-        // Note: when depthReadOnly is true, depthLoadOp and depthStoreOp must not be set
         depthStencilAttachment: {
-            view: depthTextureView,
-            depthReadOnly: true  // Don't write depth, only read
+          view: depthTextureView,
+          depthReadOnly: true
         }
       };
 

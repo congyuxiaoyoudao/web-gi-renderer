@@ -125,8 +125,6 @@ function Scene({ splatRadius, sortMethod, onCameraReady, gaussianUrl, debugDepth
       />
 
       <ambientLight intensity={0.5} />
-      <directionalLight position={[10, 10, 10]} intensity={2} castShadow color="#ffffff" />
-      <directionalLight position={[-10, 10, -10]} intensity={1} castShadow color="#ff0055" />
 
       {showDefaultScene && (
         <>

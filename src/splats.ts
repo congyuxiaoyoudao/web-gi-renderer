@@ -197,8 +197,6 @@ export class Splats {
                 frontFace: 'ccw',
                 cullMode: 'none'
             },
-            // Use hardware depth testing against pre-rendered scene depth
-            // disable depthWrite because we only read depth, not write
             depthStencil: {
                 depthWriteEnabled: false,
                 depthCompare: 'less-equal',
@@ -384,7 +382,6 @@ export class Splats {
         renderPass.setBindGroup(1, this._splatBindGroup);
         renderPass.setVertexBuffer(0, this._splatPositionBuffer);
         renderPass.setVertexBuffer(1, this._splatIdsBuffer);
-        // Draw visible splats (or all if numSplats not specified)
         const count = numSplats !== undefined ? numSplats : this._numVertices;
         renderPass.draw(4, count, 0, 0);
     }
